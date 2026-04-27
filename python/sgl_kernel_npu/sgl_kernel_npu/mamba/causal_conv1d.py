@@ -5,7 +5,7 @@
 # Adapted from https://github.com/Dao-AILab/causal-conv1d/blob/main/causal_conv1d/causal_conv1d_interface.py
 # and https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/layers/mamba/ops/causal_conv1d.py
 
-from typing import Optional, Union
+from typing import Optional, Sequence, Union
 
 import torch
 import torch.nn.functional as F
@@ -13,6 +13,24 @@ import triton
 import triton.language as tl
 
 PAD_SLOT_ID = -1
+
+
+def _host_query_start_loc_stats(
+    query_start_loc_cpu: Union[torch.Tensor, Sequence[int]],
+) -> tuple[int, int]:
+    if isinstance(query_start_loc_cpu, torch.Tensor):
+        if query_start_loc_cpu.device.type != "cpu":
+            raise ValueError("query_start_loc_cpu must be a CPU tensor or host list")
+        query_start_loc_values = [int(value) for value in query_start_loc_cpu.tolist()]
+    else:
+        query_start_loc_values = [int(value) for value in query_start_loc_cpu]
+
+    cu_seq_len = query_start_loc_values[-1]
+    max_seqlen = max(
+        end - start
+        for start, end in zip(query_start_loc_values, query_start_loc_values[1:])
+    )
+    return max_seqlen, cu_seq_len
 
 
 @triton.jit(
@@ -702,13 +720,31 @@ def prepare_data(
     cache_indices: Optional[torch.Tensor] = None,
     has_initial_state: Optional[torch.Tensor] = None,
     conv_states: Optional[torch.Tensor] = None,
+    query_start_loc_cpu: Optional[Union[torch.Tensor, Sequence[int]]] = None,
+    max_seqlen: Optional[int] = None,
+    cu_seq_len: Optional[int] = None,
+    has_initial_state_any: Optional[bool] = None,
 ):
+    if has_initial_state is None:
+        has_any = False
+    elif has_initial_state_any is not None:
+        has_any = bool(has_initial_state_any)
+    else:
+        # Fallback: forces a device->host sync. Caller should pass
+        # has_initial_state_any from host metadata to avoid this.
+        import warnings
+
+        warnings.warn(
+            "causal_conv1d.prepare_data fell back to has_initial_state.any() "
+            "device sync; pass has_initial_state_any from host metadata.",
+            stacklevel=3,
+        )
+        has_any = bool(has_initial_state.any().item())
+
     initial_states = (
         torch.index_select(conv_states, 0, cache_indices)
         * has_initial_state[:, None, None]
-        if has_initial_state is not None and has_initial_state.any()
-        else None
-    )
+    ) if has_any else None
 
     seqlens = query_start_loc[1:] - query_start_loc[:-1]
 
@@ -717,8 +753,28 @@ def prepare_data(
 
     dtype, device = weight.dtype, weight.device
     batch_size = seqlens.size(0)
-    max_T = seqlens.max()
-    dim, cu_seq_len = x.size(0), query_start_loc[-1]
+    if max_seqlen is not None and cu_seq_len is not None:
+        max_T = int(max_seqlen)
+        cu_seq_len = int(cu_seq_len)
+    elif query_start_loc_cpu is not None:
+        host_max_seqlen, host_cu_seq_len = _host_query_start_loc_stats(
+            query_start_loc_cpu
+        )
+        max_T = host_max_seqlen if max_seqlen is None else int(max_seqlen)
+        cu_seq_len = host_cu_seq_len if cu_seq_len is None else int(cu_seq_len)
+    else:
+        import warnings
+
+        warnings.warn(
+            "causal_conv1d.prepare_data fell back to device sync for "
+            "max_seqlen/cu_seq_len; pass them from host metadata.",
+            stacklevel=3,
+        )
+        max_T = int(seqlens.max().item()) if max_seqlen is None else int(max_seqlen)
+        cu_seq_len = (
+            int(query_start_loc[-1].item()) if cu_seq_len is None else int(cu_seq_len)
+        )
+    dim = x.size(0)
 
     x_flat = torch.zeros(size=(dim, batch_size * max_T), dtype=dtype, device=device)
 
@@ -743,6 +799,10 @@ def causal_conv1d_fn_npu(
     conv_states: Optional[torch.Tensor] = None,
     activation: Optional[str] = "silu",
     pad_slot_id: int = PAD_SLOT_ID,
+    query_start_loc_cpu: Optional[Union[torch.Tensor, Sequence[int]]] = None,
+    max_seqlen: Optional[int] = None,
+    cu_seq_len: Optional[int] = None,
+    has_initial_state_any: Optional[bool] = None,
     **kwargs,
 ):
     """
@@ -755,6 +815,13 @@ def causal_conv1d_fn_npu(
         the batch, used to index into sequence. prepended by 0.
         for example: query_start_loc = torch.Tensor([0,10,16,17]),
         x.shape=(dim,17)
+    query_start_loc_cpu: host-side copy/list of query_start_loc. When provided,
+        prepare_data derives max_seqlen and cu_seq_len without reading device
+        scalars.
+    max_seqlen/cu_seq_len: precomputed host ints. Passing both skips host
+        cumsum inspection and avoids device-to-host scalar sync for shape
+        construction. max_T is also accepted through kwargs as an alias for
+        max_seqlen.
     cache_indices: (batch)  int32
         indicates the corresponding state index,
         like so: conv_state = conv_states[cache_indices[batch_id]]
@@ -779,11 +846,20 @@ def causal_conv1d_fn_npu(
     if x.stride(-1) != 1:
         x = x.contiguous()
     bias = bias.contiguous() if bias is not None else None
-
-    assert query_start_loc[-1] <= x.shape[-1], f"{query_start_loc=}, {x.shape=}"
+    if max_seqlen is None:
+        max_seqlen = kwargs.pop("max_T", None)
 
     x_pad, initial_state_pad, seqlens, indices = prepare_data(
-        x, weight, query_start_loc, cache_indices, has_initial_state, conv_states
+        x,
+        weight,
+        query_start_loc,
+        cache_indices,
+        has_initial_state,
+        conv_states,
+        query_start_loc_cpu=query_start_loc_cpu,
+        max_seqlen=max_seqlen,
+        cu_seq_len=cu_seq_len,
+        has_initial_state_any=has_initial_state_any,
     )
 
     out, final_states_out = causal_conv1d_fn_native(
