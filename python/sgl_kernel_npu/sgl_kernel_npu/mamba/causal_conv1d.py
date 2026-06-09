@@ -482,6 +482,7 @@ def causal_conv1d_update_v2(
     block_idx_last_scheduled_token: torch.Tensor | None = None,
     initial_state_idx: torch.Tensor | None = None,
     validate_data=False,
+    **kwargs,
 ):
     """
     x: Input tensor which can take the following shapes:
@@ -703,11 +704,20 @@ def prepare_data(
     cache_indices: Optional[torch.Tensor] = None,
     has_initial_state: Optional[torch.Tensor] = None,
     conv_states: Optional[torch.Tensor] = None,
+    has_initial_state_any: Optional[bool] = None,
+    max_query_len: Optional[int] = None,
+    cu_seq_len: Optional[int] = None,
 ):
+    # Host-provided `has_initial_state_any` drives the branch without a D2H
+    # sync. Legacy fallback: `.any()` on the device tensor triggers one.
+    any_initial_state = has_initial_state_any
+    if any_initial_state is None and has_initial_state is not None:
+        any_initial_state = has_initial_state.any()
+
     initial_states = (
         torch.index_select(conv_states, 0, cache_indices)
         * has_initial_state[:, None, None]
-        if has_initial_state is not None and has_initial_state.any()
+        if has_initial_state is not None and any_initial_state
         else None
     )
 
@@ -718,15 +728,23 @@ def prepare_data(
 
     dtype, device = weight.dtype, weight.device
     batch_size = seqlens.size(0)
-    max_T = seqlens.max()
-    dim, cu_seq_len = x.size(0), query_start_loc[-1]
+    # Host-provided scalars avoid the `seqlens.max()` / `query_start_loc[-1]`
+    # D2H syncs; fall back to the device scalars when callers omit them.
+    max_T = max_query_len if max_query_len is not None else int(seqlens.max())
+    dim = x.size(0)
+    if cu_seq_len is None:
+        cu_seq_len = int(query_start_loc[-1])
 
     x_flat = torch.zeros(size=(dim, batch_size * max_T), dtype=dtype, device=device)
 
-    base_idx = torch.arange(batch_size, device=device, dtype=torch.int32) * max_T
-    base_t = torch.arange(max_T, device=device, dtype=torch.int32).unsqueeze(0)
-    mask = base_t < seqlens.unsqueeze(1)
-    indices = (base_idx.unsqueeze(1) + base_t)[mask]
+    # Scatter indices for packing varlen x into a (batch, max_T) padded layout.
+    # Boolean-mask indexing would sync (data-dependent output size); `searchsorted`
+    # keeps the output shape static (== cu_seq_len), so the path stays on-device.
+    qsl = query_start_loc.to(torch.long)
+    g = torch.arange(cu_seq_len, device=device, dtype=torch.long)
+    batch_id = torch.searchsorted(qsl[1:], g, right=True)
+    local_t = g - qsl[:-1][batch_id]
+    indices = batch_id * max_T + local_t
 
     x_flat.index_copy_(1, indices, x[..., :cu_seq_len])
     x_pad = x_flat.view(dim, batch_size, max_T).transpose(0, 1).contiguous()
@@ -744,6 +762,9 @@ def causal_conv1d_fn_npu(
     conv_states: Optional[torch.Tensor] = None,
     activation: Optional[str] = "silu",
     pad_slot_id: int = PAD_SLOT_ID,
+    max_query_len: Optional[int] = None,
+    cu_seq_len: Optional[int] = None,
+    has_initial_state_any: Optional[bool] = None,
     **kwargs,
 ):
     """
@@ -781,10 +802,21 @@ def causal_conv1d_fn_npu(
         x = x.contiguous()
     bias = bias.contiguous() if bias is not None else None
 
-    assert query_start_loc[-1] <= x.shape[-1], f"{query_start_loc=}, {x.shape=}"
+    # Host-provided `cu_seq_len` keeps this guard sync-free; skip it in the
+    # legacy path rather than reintroducing a `query_start_loc[-1]` D2H sync.
+    if cu_seq_len is not None:
+        assert cu_seq_len <= x.shape[-1], f"{cu_seq_len=}, {x.shape=}"
 
     x_pad, initial_state_pad, seqlens, indices = prepare_data(
-        x, weight, query_start_loc, cache_indices, has_initial_state, conv_states
+        x,
+        weight,
+        query_start_loc,
+        cache_indices,
+        has_initial_state,
+        conv_states,
+        has_initial_state_any=has_initial_state_any,
+        max_query_len=max_query_len,
+        cu_seq_len=cu_seq_len,
     )
 
     out, final_states_out = causal_conv1d_fn_native(
