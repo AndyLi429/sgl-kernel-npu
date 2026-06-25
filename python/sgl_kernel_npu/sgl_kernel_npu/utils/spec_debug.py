@@ -8,8 +8,12 @@ is NO torch import in this module (the tiny per-request tensors are read via
 
 Enable on a debug / canary instance only::
 
-    export SGLANG_NPU_SPEC_DEBUG=1            # turn on
+    export SGLANG_NPU_SPEC_DEBUG=1            # turn on  (MUST be exported!)
     export SGLANG_NPU_SPEC_DEBUG_EVERY=200    # (optional) periodic-summary period
+
+Key lines are written to BOTH the logger AND stderr (flushed), so they survive
+any logging-config filtering as long as the process stderr is captured
+(``... > sglang.log 2>&1``).
 
 What it catches
 ---------------
@@ -18,28 +22,19 @@ What it catches
    (causal_conv1d.py). If ``num_accepted_tokens`` ever reaches the kernel as 0,
    the offset is -1 and the kernel reads the conv slot BEFORE this request's
    region -> a cross-request recurrent-state read -> corrupted state -> loop.
-   ``record_accept`` emits a WARNING the instant min(num_accepted) < 1, with the
-   offending slot ids.
+2. LOW-ACCEPT TAIL (validates the reproduction direction): periodic accept
+   histogram; the bug needs the low tail, which accept==1 workloads never make.
+3. CONV vs SSM ROLLBACK INDEX (the deeper desync suspect): logs both rollback
+   index tensors with slot ids so they can be diffed offline.
 
-2. LOW-ACCEPT TAIL (validates the reproduction direction):
-   loops only appear when spec acceptance drops in-batch. The periodic accept
-   histogram makes the low-accept tail visible, so you can confirm your load
-   actually exercises the rollback boundary (accept==1 runs never do).
-
-3. CONV vs SSM ROLLBACK INDEX (the deeper desync suspect):
-   ``h`` rolls back via snapshot-select (last_steps); conv via offset/shift
-   (step_indices / num_accepted-1). ``record_rollback`` logs both index tensors
-   with slot ids so they can be diffed offline -- for the same slot in the same
-   step they MUST agree; a mismatch is the desync smoking gun.
-
-NOTE: enabling this adds a per-call device->host sync, which perturbs timing.
-It reliably catches the DATA bugs (1)/(2)/(3) above, but may mask pure TIMING
-races (overlap / spec-v2). For those, use ASCEND_LAUNCH_BLOCKING=1 and
-SGLANG_ENABLE_OVERLAP_PLAN_STREAM=0 instead.
+NOTE: enabling adds a per-call device->host sync (perturbs timing). It reliably
+catches the DATA bugs above, but may mask pure TIMING races (overlap / spec-v2);
+for those use ASCEND_LAUNCH_BLOCKING=1 and SGLANG_ENABLE_OVERLAP_PLAN_STREAM=0.
 """
 
 import logging
 import os
+import sys
 import threading
 
 logger = logging.getLogger("sgl_kernel_npu.spec_debug")
@@ -74,13 +69,27 @@ def _period():
     return _every
 
 
+def _emit(msg, warn=False):
+    # stderr is captured into sglang.log via 2>&1 even if the named logger is
+    # filtered by sglang's logging setup -> guaranteed visibility.
+    try:
+        print(msg, file=sys.stderr, flush=True)
+    except Exception:
+        pass
+    if warn:
+        logger.warning(msg)
+    else:
+        logger.info(msg)
+
+
 def _announce_once():
     global _announced
     if not _announced:
         _announced = True
-        logger.warning(
+        _emit(
             "[spec_debug] ENABLED via SGLANG_NPU_SPEC_DEBUG; per-call device->host "
-            "sync added -- use on a debug/canary instance only."
+            "sync added -- use on a debug/canary instance only.",
+            warn=True,
         )
 
 
@@ -108,27 +117,18 @@ def record_accept(num_accepted_tokens, state_indices=None, tag="conv"):
                 except Exception:
                     slots = None
             n_bad = sum(1 for v in na if v < 1)
-            logger.warning(
-                "[spec_debug:%s] NEGATIVE OFFSET min(num_accepted)=%d -> offset=%d "
-                "bs=%d n_bad=%d bad_slots=%s accept=%s",
-                tag,
-                na_min,
-                na_min - 1,
-                bs,
-                n_bad,
-                slots,
-                na,
+            _emit(
+                f"[spec_debug:{tag}] NEGATIVE OFFSET min(num_accepted)={na_min} -> "
+                f"offset={na_min - 1} bs={bs} n_bad={n_bad} bad_slots={slots} accept={na}",
+                warn=True,
             )
         elif c % _period() == 0:
             hist = {}
             for v in na:
                 hist[v] = hist.get(v, 0) + 1
-            logger.info(
-                "[spec_debug:%s] call=%d bs=%d accept_count_hist=%s",
-                tag,
-                c,
-                bs,
-                dict(sorted(hist.items())),
+            _emit(
+                f"[spec_debug:{tag}] call={c} bs={bs} "
+                f"accept_count_hist={dict(sorted(hist.items()))}"
             )
     except Exception as e:  # instrumentation must never break the run
         logger.debug("[spec_debug] record_accept skipped: %s", e)
@@ -153,17 +153,11 @@ def record_rollback(name, step_idx_tensor, slot_tensor=None, draft_token_num=Non
             except Exception:
                 slots = None
         if steps:
-            logger.info(
-                "[spec_debug:%s] tick=%d draft=%s step_min=%d step_max=%d n_neg=%d "
-                "step_idx=%s slots=%s",
-                name,
-                n,
-                draft_token_num,
-                min(steps),
-                max(steps),
-                sum(1 for v in steps if v < 0),
-                steps,
-                slots,
+            n_neg = sum(1 for v in steps if v < 0)
+            _emit(
+                f"[spec_debug:{name}] tick={n} draft={draft_token_num} "
+                f"step_min={min(steps)} step_max={max(steps)} n_neg={n_neg} "
+                f"step_idx={steps} slots={slots}"
             )
     except Exception as e:
         logger.debug("[spec_debug] record_rollback skipped: %s", e)
