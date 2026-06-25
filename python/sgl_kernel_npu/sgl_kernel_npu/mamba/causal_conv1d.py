@@ -601,6 +601,13 @@ def causal_conv1d_update_v2(
             triton.cdiv(dim, META["BLOCK_N"]),
         )
 
+    # >>> spec_debug (env-gated, SGLANG_NPU_SPEC_DEBUG=1): catches num_accepted==0
+    # -> conv_state_token_offset = -1 -> cross-request conv-state read.
+    if num_accepted_tokens is not None:
+        from sgl_kernel_npu.utils.spec_debug import record_accept
+
+        record_accept(num_accepted_tokens, conv_state_indices, tag="conv_v2")
+    # <<< spec_debug
     _causal_conv1d_update_kernel_npu_tiled[grid](
         x,
         weight,
@@ -1376,6 +1383,12 @@ def causal_conv1d_update_npu(
             activation=activation,
         )
     else:
+        # >>> spec_debug (env-gated): same negative-offset guard for the non-tiled kernel.
+        if num_accepted_tokens is not None:
+            from sgl_kernel_npu.utils.spec_debug import record_accept
+
+            record_accept(num_accepted_tokens, conv_state_indices, tag="conv")
+        # <<< spec_debug
         _causal_conv1d_update_kernel[grid](
             # Pointers to matrices
             x,
