@@ -123,6 +123,12 @@ def move_intermediate_cache(
     # Grid: one thread per valid index
     grid = (len(dst_indices_tensor),)
 
+    # >>> spec_debug (env-gated): log the SSM-h rollback step (last_steps) + dst slots,
+    # to be diffed offline against the conv rollback (num_accepted-1 / step_indices).
+    from sgl_kernel_npu.utils.spec_debug import record_rollback
+
+    record_rollback("ssm_move", last_steps_tensor, dst_indices_tensor)
+    # <<< spec_debug
     move_cache_dynamic_last_kernel_h_block[grid](
         dst_cache_ptr=ssm_states,
         src_cache_ptr=intermediate_state_cache,
@@ -270,6 +276,11 @@ def conv_state_rollback(
     # Grid over all requests
     grid = (num_requests,)
 
+    # >>> spec_debug (env-gated): log the conv rollback step indices + slots.
+    from sgl_kernel_npu.utils.spec_debug import record_rollback
+
+    record_rollback("conv_rollback", step_indices, state_indices, draft_token_num)
+    # <<< spec_debug
     _conv_state_rollback_kernel[grid](
         conv_states,
         state_indices,
