@@ -30,6 +30,20 @@ FILE(GLOB OP_SRCS
     ${PROJECT_OP_SRC_BASE}/causal_conv1d/op_host/causal_conv1d.cpp
     ${PROJECT_OP_SRC_BASE}/apply_token_bitmask/op_host/apply_token_bitmask.cpp
     )
+
+# Ascend950 (A5) operator bindings. These reach the device through the custom
+# OPP package built by csrc/a5_ops/build_a5_ops.sh rather than through a kernel
+# compiled into this library, and EXEC_NPU_CMD resolves every aclnn entrypoint
+# with dlsym, so they build on any SOC. Turn OFF only if the vendored
+# aclnn_torch_adapter stops compiling against the local torch_npu.
+option(BUILD_A5_OPS_BINDING "Build torch bindings for the Ascend950 custom operator package" ON)
+if(BUILD_A5_OPS_BINDING)
+    list(APPEND OP_SRCS
+        ${PROJECT_OP_SRC_BASE}/a5_ops_binding/a5_ops.cpp
+        ${PROJECT_OP_SRC_BASE}/a5_ops_binding/aclnn_torch_adapter/NPUBridge.cpp
+        ${PROJECT_OP_SRC_BASE}/a5_ops_binding/aclnn_torch_adapter/NPUStorageImpl.cpp
+    )
+endif()
 if(BUILD_CATLASS_MODULE)
     list(APPEND OP_SRCS
         ${PROJECT_OP_SRC_BASE}/catlass/op_host/catlass_matmul_basic.cpp
@@ -153,8 +167,18 @@ target_link_directories(${OP_PLUGIN_NAME} PRIVATE
         ${TORCH_NPU_DIR}/lib
 )
 
+# The A5 bindings dlopen("libcust_opapi.so") by soname. This library is
+# installed at ../vendors/<vendor>_transformer/op_api/lib relative to the
+# lib/ directory this .so lands in, and LD_LIBRARY_PATH cannot be extended
+# from Python after the process starts, so the path has to be baked in here.
+# __init__.py additionally preloads it by absolute path as a fallback.
+target_link_options(${OP_PLUGIN_NAME} PRIVATE
+        "-Wl,-rpath,$ORIGIN:$ORIGIN/../vendors/sglang_transformer/op_api/lib"
+)
+
 target_include_directories(${OP_PLUGIN_NAME} PRIVATE
         ${PROJECT_OP_SRC_BASE}/utils
+        ${PROJECT_OP_SRC_BASE}/a5_ops_binding
         ${PROJECT_SOURCE_DIR}/include
         ${PROJECT_OP_SRC_BASE}/causal_conv1d_update/op_kernel
         ${PROJECT_OP_SRC_BASE}/causal_conv1d_update/op_host/tiling

@@ -45,5 +45,7 @@ setuptools.setup(
     url="https://github.com/sgl-project/sgl-kernel-npu/",
     license="BSD 3 License",
     python_requires=">=3.7",
-    package_data={"sgl_kernel_npu": ["lib/**", "VERSION"]},
+    # vendors/** carries the Ascend950 custom OPP package when the wheel is
+    # built with './build.sh -a a5ops'; it is absent otherwise.
+    package_data={"sgl_kernel_npu": ["lib/**", "vendors/**", "VERSION"]},
 )

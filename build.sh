@@ -7,9 +7,15 @@ BUILD_DEEPEP_OPS="ON"
 BUILD_KERNELS_MODULE="ON"
 BUILD_MEMORY_SAVER_MODULE="ON"
 
+# A5-only: the Ascend950 custom operator package needs an A5 CANN toolkit and is
+# not part of an A2/A3 build. Opt in with '-a a5ops', or by passing an Ascend950
+# SOC_VERSION.
+BUILD_A5_OPS_MODULE="OFF"
+
 ONLY_BUILD_DEEPEP_ADAPTER_MODULE="OFF"
 ONLY_BUILD_DEEPEP_KERNELs_MODULE="OFF"
 ONLY_BUILD_MEMORY_SAVER_MODULE="OFF"
+ONLY_BUILD_A5_OPS_MODULE="OFF"
 
 DEBUG_MODE="OFF"
 
@@ -43,9 +49,14 @@ while getopts ":a:hd" opt; do
                     BUILD_MEMORY_SAVER_MODULE="ON"
                     ONLY_BUILD_MEMORY_SAVER_MODULE="ON"
                     ;;
+                a5ops )
+                    BUILD_A5_OPS_MODULE="ON"
+                    ONLY_BUILD_A5_OPS_MODULE="ON"
+                    BUILD_ATTENTIONS_MODULE="OFF"
+                    ;;
                 * )
                     echo "Error: Invalid Value"
-                    echo "Allowed value: deepep|kernels|deepep-adapter|deepep-kernels|memory-saver"
+                    echo "Allowed value: deepep|kernels|deepep-adapter|deepep-kernels|memory-saver|a5ops"
                     exit 1
                     ;;
             esac
@@ -62,6 +73,7 @@ while getopts ":a:hd" opt; do
             echo "    deepep-adapter    Only build deepep adapter layer and use old build of deepep kernels."
             echo "    deepep-kernels    Only build deepep kernels and use old build of deepep adapter layer."
             echo "    memory-saver      Only build torch_memory_saver (under contrib)."
+            echo "    a5ops             Only build the Ascend950 (A5) custom operator package."
             exit 1
             ;;
         \? )
@@ -93,6 +105,12 @@ else
 fi
 
 echo "Use SOC_VERSION: $SOC_VERSION"
+
+# An Ascend950 SOC_VERSION implies an A5 toolchain, so build the A5 operator
+# package alongside whatever else was requested.
+if [[ "$SOC_VERSION" == Ascend950* ]]; then
+    BUILD_A5_OPS_MODULE="ON"
+fi
 
 echo "=== Fixing ASCConfig for CANN 8.3 / A2 ==="
 
@@ -153,6 +171,7 @@ function build_kernels()
 {
     if [[ "$ONLY_BUILD_DEEPEP_KERNELs_MODULE" == "ON" ]]; then return 0; fi
     if [[ "$ONLY_BUILD_MEMORY_SAVER_MODULE" == "ON" ]]; then return 0; fi
+    if [[ "$ONLY_BUILD_A5_OPS_MODULE" == "ON" ]]; then return 0; fi
 
     CMAKE_DIR=""
     BUILD_DIR="build"
@@ -270,8 +289,16 @@ function make_sgl_kernel_npu_package()
     cd -
 }
 
+function build_a5_ops()
+{
+    echo "run build Ascend950 (A5) custom operator package"
+    bash "${CURRENT_DIR}/csrc/a5_ops/build_a5_ops.sh"
+}
+
 function build_attentions_kernels()
 {
+    if [[ "$BUILD_ATTENTIONS_MODULE" != "ON" ]]; then return 0; fi
+
     CUSTOM_OPP_DIR="${CURRENT_DIR}/python/attentions/attentions"
     KERNEL_DIR="csrc/attentions/build"
 
@@ -301,6 +328,9 @@ function main()
     build_kernels
     build_deepep_kernels
     build_attentions_kernels
+    if [[ "$BUILD_A5_OPS_MODULE" == "ON" ]]; then
+        build_a5_ops
+    fi
     if pip3 show wheel;then
         echo "wheel has been installed"
     else

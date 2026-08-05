@@ -1,5 +1,15 @@
 default_stages: [pre-commit, pre-push, manual]
 
+# Code vendored verbatim from upstream projects. Reformatting it to this repo's
+# style would make re-syncing with upstream a manual merge every time, so it is
+# left byte-identical to its source. csrc/a5_ops_binding/a5_ops.cpp is ours and
+# is deliberately not excluded.
+exclude: |
+  (?x)^(
+    csrc/a5_ops/.*|
+    csrc/a5_ops_binding/aclnn_torch_adapter/.*
+  )$
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0

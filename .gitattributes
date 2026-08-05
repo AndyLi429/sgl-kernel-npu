@@ -1,0 +1,13 @@
+# Vendored upstream code: keep bytes exactly as they came from the source
+# project so re-syncing stays a clean diff. Without this, a checkout on a
+# machine with core.autocrlf=true (the Windows default) rewrites these files
+# to CRLF, which both breaks the shell scripts on the Linux build host and
+# makes every file look modified against upstream.
+csrc/a5_ops/**                          -text
+csrc/a5_ops_binding/aclnn_torch_adapter/**  -text
+
+# ... except the scripts that have to execute on the Ascend build host, which
+# must be LF regardless of what any contributor's working tree does.
+csrc/a5_ops/build.sh                    text eol=lf
+csrc/a5_ops/build_a5_ops.sh             text eol=lf
+csrc/a5_ops/cmake/scripts/**/*.sh       text eol=lf
