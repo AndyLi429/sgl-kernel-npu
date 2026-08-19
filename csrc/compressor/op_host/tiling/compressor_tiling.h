@@ -24,11 +24,10 @@
 #include <sstream>
 #include "register/tilingdata_base.h"
 #include "tiling/tiling_api.h"
-#include "exe_graph/runtime/tiling_context.h"
 #include "register/op_def_registry.h"
+#include "ge_helper.h"
 #include "../../op_kernel/arch35/compressor_template_tiling_key.h"
 #include "compressor_tiling_data.h"
-#include "platform/platform_info.h"
 
 #ifdef ASCENDC_OP_TEST
 #define CMP_EXTERN_C extern "C"
@@ -81,8 +80,6 @@ constexpr uint32_t MIN_BLOCK_SIZE = 1;
 constexpr uint32_t MAX_BLOCK_SIZE = 1024;
 constexpr uint32_t MAX_CMPRATIO_SIZE = 128;
 constexpr uint32_t MIN_CMPRATIO_SIZE = 2;
-
-constexpr uint32_t BATCH_MODE_SCHEDULE = 1;
 
 static const std::string X_NAME = "query";
 static const std::string WKV_NAME = "wkv";
@@ -211,8 +208,6 @@ enum class CACHE_MODE : uint8_t { LINEAR_BUFFER = 1, RING_BUFFER = 2 };
 
 struct CompressorContext {
     const char *opName;
-    const char *opType;
-    fe::PlatFormInfos *platformInfo;
     int batchConsistency;
 
     RequiredParaInfo x;
@@ -231,7 +226,7 @@ struct CompressorContext {
     const int *coff;
     const int *cmpRatio;
     const int *cacheMode;
-    const int *stateCacheStrideDim0;
+    const int64_t *stateCacheStrideDim0;
     const bool *gradEnabled;
     TemplateId templateId;
 
@@ -249,13 +244,14 @@ public:
     explicit CompressorTiling(CompressorContext *context) : context_(context) {}
     ~CompressorTiling() = default;
 
-    static ge::graphStatus ConvertContext(gert::TilingContext &context, CompressorContext &compressorContext);
+    static ge::graphStatus ConvertContext(sglang::ge_helper::TilingContext &context,
+                                          CompressorContext &compressorContext);
     ge::graphStatus RunBigKernelTiling(CompressorTilingData *tilingData);
 
 private:
-    static void ConvertRequiredParams(gert::TilingContext &context, CompressorContext &compressorContext);
+    static void ConvertRequiredParams(sglang::ge_helper::TilingContext &context, CompressorContext &compressorContext);
 
-    static void ConvertOptionalParams(gert::TilingContext &context, CompressorContext &compressorContext);
+    static void ConvertOptionalParams(sglang::ge_helper::TilingContext &context, CompressorContext &compressorContext);
     ge::graphStatus GetNpuInfo();
     ge::graphStatus SetBaseInfo();
     ge::graphStatus SetPageAttentionInfo();
@@ -336,7 +332,9 @@ private:
 
 }  // namespace
 
-CMP_EXTERN_C ge::graphStatus TilingCompressorArch35(gert::TilingContext *context);
+CMP_EXTERN_C ge::graphStatus TilingCompressorArch35(sglang::ge_helper::TilingContext *context,
+                                                    CompressorTilingData *tilingData, uint64_t &tilingKey,
+                                                    uint32_t &blockDim);
 }  // namespace optiling
 
 #endif

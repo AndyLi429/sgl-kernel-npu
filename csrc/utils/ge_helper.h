@@ -194,6 +194,15 @@ public:
         return *this;
     }
 
+    AttrDef &Bool(bool value)
+    {
+        TORCH_CHECK(valueInitialized_ == false,
+                    "[GE_Helper] Cannot set default value for an attribute that has already been initialized.");
+        anyValue_ = value;
+        valueInitialized_ = true;
+        return *this;
+    }
+
     const std::any GetValue() const
     {
         return anyValue_;
@@ -379,6 +388,16 @@ public:
         runtimeAttrs_ = runtimeAttrs;
     }
 
+    void SetDeterministicLevel(int deterministicLevel)
+    {
+        deterministicLevel_ = deterministicLevel;
+    }
+
+    int GetDeterministicLevel() const
+    {
+        return deterministicLevel_;
+    }
+
     void SetWorkspaceSizes(size_t userSize)
     {
         auto platformAscendC = platform_ascendc::PlatformAscendCManager::GetInstance();
@@ -420,6 +439,7 @@ private:
     size_t systemWorkSpaceSize_ = 0;
     size_t userWorkSpaceSize_ = 0;
     std::vector<size_t *> workSpaceSize_{&systemWorkSpaceSize_, &userWorkSpaceSize_};
+    int deterministicLevel_ = 0;
 };
 
 // TODO: Do automatic registry template class at compile time

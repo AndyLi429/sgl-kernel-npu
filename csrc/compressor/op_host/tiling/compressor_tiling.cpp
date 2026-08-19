@@ -27,18 +27,19 @@ using namespace AscendC;
 namespace optiling {
 namespace {
 
-void CompressorTiling::ConvertRequiredParams(gert::TilingContext &context, CompressorContext &compressorContext)
+void CompressorTiling::ConvertRequiredParams(sglang::ge_helper::TilingContext &context,
+                                             CompressorContext &compressorContext)
 {
-    compressorContext.x.desc = context.GetRequiredInputDesc(TOKEN_X_INPUT_INDEX);
-    compressorContext.x.shape = context.GetRequiredInputShape(TOKEN_X_INPUT_INDEX);
-    compressorContext.wkv.desc = context.GetRequiredInputDesc(WEIGHT_KV_INPUT_INDEX);
-    compressorContext.wkv.shape = context.GetRequiredInputShape(WEIGHT_KV_INPUT_INDEX);
-    compressorContext.wgate.desc = context.GetRequiredInputDesc(WEIGHT_WGATE_INPUT_INDEX);
-    compressorContext.wgate.shape = context.GetRequiredInputShape(WEIGHT_WGATE_INPUT_INDEX);
-    compressorContext.stateCache.desc = context.GetRequiredInputDesc(STATE_CACHE_INPUT_INDEX);
-    compressorContext.stateCache.shape = context.GetRequiredInputShape(STATE_CACHE_INPUT_INDEX);
-    compressorContext.ape.desc = context.GetRequiredInputDesc(APE_INPUT_INDEX);
-    compressorContext.ape.shape = context.GetRequiredInputShape(APE_INPUT_INDEX);
+    compressorContext.x.desc = context.GetInputDesc(TOKEN_X_INPUT_INDEX);
+    compressorContext.x.shape = context.GetInputShape(TOKEN_X_INPUT_INDEX);
+    compressorContext.wkv.desc = context.GetInputDesc(WEIGHT_KV_INPUT_INDEX);
+    compressorContext.wkv.shape = context.GetInputShape(WEIGHT_KV_INPUT_INDEX);
+    compressorContext.wgate.desc = context.GetInputDesc(WEIGHT_WGATE_INPUT_INDEX);
+    compressorContext.wgate.shape = context.GetInputShape(WEIGHT_WGATE_INPUT_INDEX);
+    compressorContext.stateCache.desc = context.GetInputDesc(STATE_CACHE_INPUT_INDEX);
+    compressorContext.stateCache.shape = context.GetInputShape(STATE_CACHE_INPUT_INDEX);
+    compressorContext.ape.desc = context.GetInputDesc(APE_INPUT_INDEX);
+    compressorContext.ape.shape = context.GetInputShape(APE_INPUT_INDEX);
 
     compressorContext.cmpKv.desc = context.GetOutputDesc(CMP_KV_OUTPUT_INDEX);
     compressorContext.cmpKv.shape = context.GetOutputShape(CMP_KV_OUTPUT_INDEX);
@@ -57,19 +58,27 @@ void CompressorTiling::ConvertRequiredParams(gert::TilingContext &context, Compr
     }
 }
 
-void CompressorTiling::ConvertOptionalParams(gert::TilingContext &context, CompressorContext &compressorContext)
+void CompressorTiling::ConvertOptionalParams(sglang::ge_helper::TilingContext &context,
+                                             CompressorContext &compressorContext)
 {
-    compressorContext.stateBlockTable.desc = context.GetOptionalInputDesc(STATE_BLOCK_TABLE_INPUT_INDEX);
-    compressorContext.stateBlockTable.shape = context.GetOptionalInputShape(STATE_BLOCK_TABLE_INPUT_INDEX);
-    compressorContext.cuSeqlens.desc = context.GetOptionalInputDesc(CU_SEQ_LEN_INPUT_INDEX);
-    compressorContext.cuSeqlens.shape = context.GetOptionalInputShape(CU_SEQ_LEN_INPUT_INDEX);
-    compressorContext.seqUsed.desc = context.GetOptionalInputDesc(SEQ_USED_INPUT_INDEX);
-    compressorContext.seqUsed.shape = context.GetOptionalInputShape(SEQ_USED_INPUT_INDEX);
-    compressorContext.startPos.desc = context.GetOptionalInputDesc(START_POS_INPUT_INDEX);
-    compressorContext.startPos.shape = context.GetOptionalInputShape(START_POS_INPUT_INDEX);
+    auto convertOptional = [&context](uint32_t index, OptionalParaInfo &param) {
+        param.tensor = context.GetOptionalInputTensor(index);
+        if (param.tensor == nullptr) {
+            param.desc = nullptr;
+            param.shape = nullptr;
+            return;
+        }
+        param.desc = context.GetOptionalInputDesc(index);
+        param.shape = context.GetOptionalInputShape(index);
+    };
+    convertOptional(STATE_BLOCK_TABLE_INPUT_INDEX, compressorContext.stateBlockTable);
+    convertOptional(CU_SEQ_LEN_INPUT_INDEX, compressorContext.cuSeqlens);
+    convertOptional(SEQ_USED_INPUT_INDEX, compressorContext.seqUsed);
+    convertOptional(START_POS_INPUT_INDEX, compressorContext.startPos);
 }
 
-ge::graphStatus CompressorTiling::ConvertContext(gert::TilingContext &context, CompressorContext &compressorContext)
+ge::graphStatus CompressorTiling::ConvertContext(sglang::ge_helper::TilingContext &context,
+                                                 CompressorContext &compressorContext)
 {
     if (context.GetNodeName() == nullptr) {
         OP_LOGE_FOR_INVALID_ARGUMENT_WITH_REASON("Compressor", "opName", "got from TilingContext is nullptr");
@@ -79,8 +88,6 @@ ge::graphStatus CompressorTiling::ConvertContext(gert::TilingContext &context, C
     OP_LOGI("Getting Context");
 
     compressorContext.opName = context.GetNodeName();
-    compressorContext.opType = context.GetNodeType();
-    compressorContext.platformInfo = context.GetPlatformInfo();
     ConvertRequiredParams(context, compressorContext);
     ConvertOptionalParams(context, compressorContext);
 
@@ -91,7 +98,7 @@ ge::graphStatus CompressorTiling::ConvertContext(gert::TilingContext &context, C
     compressorContext.coff = attrs->GetAttrPointer<int>(COFF_ATTR_INDEX);
     compressorContext.cmpRatio = attrs->GetAttrPointer<int>(CMP_RATIO_ATTR_INDEX);
     compressorContext.cacheMode = attrs->GetAttrPointer<int>(CACHE_MODE_ATTR_INDEX);
-    compressorContext.stateCacheStrideDim0 = attrs->GetAttrPointer<int>(STATE_CACHE_STRIDE_DIM0_ATTR_INDEX);
+    compressorContext.stateCacheStrideDim0 = attrs->GetAttrPointer<int64_t>(STATE_CACHE_STRIDE_DIM0_ATTR_INDEX);
     compressorContext.batchConsistency = context.GetDeterministicLevel();
     OP_LOGD(context.GetNodeName(), "deterministic_level=%d", context.GetDeterministicLevel());
     compressorContext.gradEnabled = attrs->GetAttrPointer<bool>(GRAD_ENABLED_ATTR_INDEX);
@@ -105,11 +112,7 @@ ge::graphStatus CompressorTiling::ConvertContext(gert::TilingContext &context, C
 
 ge::graphStatus CompressorTiling::GetNpuInfo()
 {
-    OP_CHECK_IF(context_->platformInfo == nullptr,
-                OP_LOGE_FOR_INVALID_ARGUMENT_WITH_REASON(context_->opName, "platformInfo", "is nullptr"),
-                return ge::GRAPH_FAILED);
-
-    auto ascendcPlatform = platform_ascendc::PlatformAscendC(context_->platformInfo);
+    auto ascendcPlatform = *platform_ascendc::PlatformAscendCManager::GetInstance();
     socVersion_ = ascendcPlatform.GetSocVersion();
 
     libapiSize_ = ascendcPlatform.GetLibApiWorkSpaceSize();
@@ -360,7 +363,7 @@ ge::graphStatus CompressorTiling::GenTilingKey() const
     uint8_t layout = 0;
     uint8_t templateId = static_cast<uint8_t>(context_->templateId);
     uint8_t cacheMode = static_cast<uint8_t>(*context_->cacheMode);
-    uint8_t gradEnabled = static_cast<uint8_t>(context_->gradEnabled ? 1 : 0);
+    uint8_t gradEnabled = static_cast<uint8_t>(*context_->gradEnabled ? 1 : 0);
 
     auto xDtype = context_->x.desc->GetDataType();
     if (xDtype == ge::DT_BF16) {
@@ -938,9 +941,14 @@ ge::graphStatus CompressorTiling::CheckMultiParaConsistency() const
 
 }  // namespace
 
-CMP_EXTERN_C ge::graphStatus TilingCompressorArch35(gert::TilingContext *context)
+CMP_EXTERN_C ge::graphStatus TilingCompressorArch35(sglang::ge_helper::TilingContext *context,
+                                                    CompressorTilingData *tilingData, uint64_t &tilingKey,
+                                                    uint32_t &blockDim)
 {
     OP_CHECK_IF(context == nullptr, OP_LOGE_FOR_INVALID_ARGUMENT_WITH_REASON("Compressor", "context", "is nullptr"),
+                return ge::GRAPH_FAILED);
+    OP_CHECK_IF(tilingData == nullptr,
+                OP_LOGE_FOR_INVALID_ARGUMENT_WITH_REASON("Compressor", "tilingData", "is nullptr"),
                 return ge::GRAPH_FAILED);
 
     OP_LOGI("Getting Tiling");
@@ -952,17 +960,11 @@ CMP_EXTERN_C ge::graphStatus TilingCompressorArch35(gert::TilingContext *context
         return ge::GRAPH_FAILED;
     }
     CompressorTiling compressorTiling(&compressorContext);
-    CompressorTilingData *tilingData = context->GetTilingData<CompressorTilingData>();
-    OP_CHECK_IF(tilingData == nullptr,
-                OP_LOGE_FOR_INVALID_ARGUMENT_WITH_REASON(compressorContext.opName, "tilingData", "is nullptr"),
-                return ge::GRAPH_FAILED);
-    // 使用SyncAll，需要设置为batchmode模式，所有核同时启动，否则多流方式下执行可能会卡死
-    context->SetScheduleMode(BATCH_MODE_SCHEDULE);
     if (compressorTiling.RunBigKernelTiling(tilingData) != ge::GRAPH_SUCCESS) {
         return ge::GRAPH_FAILED;
     }
-    context->SetTilingKey(compressorContext.tilingKey);
-    context->SetBlockDim(compressorContext.blockDim);
+    tilingKey = compressorContext.tilingKey;
+    blockDim = compressorContext.blockDim;
     OP_LOGI(compressorContext.opName, "block dim: %u.", compressorContext.blockDim);
     return ge::GRAPH_SUCCESS;
 }
