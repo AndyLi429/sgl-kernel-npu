@@ -18,6 +18,18 @@ if(SGL_KERNEL_ENABLE_A3_ONLY_OPS)
 endif()
 message(STATUS "SGL_KERNEL_ENABLE_A3_ONLY_OPS=${SGL_KERNEL_ENABLE_A3_ONLY_OPS} (SOC=${SOC_VERSION})")
 
+if(NOT DEFINED SGL_KERNEL_ENABLE_A5_ONLY_OPS)
+    if(_sgl_soc_lower MATCHES "^ascend950")
+        set(SGL_KERNEL_ENABLE_A5_ONLY_OPS ON)
+    else()
+        set(SGL_KERNEL_ENABLE_A5_ONLY_OPS OFF)
+    endif()
+endif()
+if(SGL_KERNEL_ENABLE_A5_ONLY_OPS)
+    add_compile_definitions(SGL_KERNEL_ENABLE_A5_ONLY_OPS)
+endif()
+message(STATUS "SGL_KERNEL_ENABLE_A5_ONLY_OPS=${SGL_KERNEL_ENABLE_A5_ONLY_OPS} (SOC=${SOC_VERSION})")
+
 # host side files
 set(OP_SRCS
     ${PROJECT_OP_SRC_BASE}/pytorch_extensions.cpp

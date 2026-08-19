@@ -93,6 +93,14 @@ TORCH_LIBRARY_FRAGMENT(npu, m)
         "Tensor conv_state_indices, Tensor? bias=None, Tensor? num_accepted_tokens=None, "
         "Tensor? query_start_loc=None, bool activation_mode=False, int pad_slot_id=-1) -> Tensor");
 
+#ifdef SGL_KERNEL_ENABLE_A5_ONLY_OPS
+    m.def(
+        "compressor(Tensor x, Tensor wkv, Tensor wgate, Tensor(a!) state_cache, "
+        "Tensor ape, Tensor? state_block_table=None, Tensor? cu_seqlens=None, "
+        "Tensor? seqused=None, Tensor? start_pos=None, *, int cmp_ratio=4, "
+        "int coff=1, int cache_mode=1) -> Tensor");
+#endif
+
 #ifdef SGL_KERNEL_ENABLE_A3_ONLY_OPS
     m.def(
         "mla_preprocess(Tensor hiddenState, Tensor gamma0, Tensor beta0, Tensor wdqkv, "
@@ -217,6 +225,10 @@ TORCH_LIBRARY_IMPL(npu, PrivateUse1, m)
                                                                     bias_or_empty, num_accepted_or_empty,
                                                                     query_loc_or_empty, activation_mode, pad_slot_id);
            });
+
+#ifdef SGL_KERNEL_ENABLE_A5_ONLY_OPS
+    m.impl("compressor", TORCH_FN(sglang::npu_kernel::compressor));
+#endif
 
 #ifdef SGL_KERNEL_ENABLE_A3_ONLY_OPS
     m.impl("mla_preprocess", TORCH_FN(sglang::npu_kernel::mla_preprocess));
