@@ -261,7 +261,9 @@ HOST_API at::Tensor compressor(const at::Tensor &x, const at::Tensor &wkv, const
     const auto tilingSize = static_cast<int64_t>(sizeof(tilingData));
     auto byteOptions = x.options().dtype(at::kByte).requires_grad(false);
     at::Tensor tiling = at::empty({tilingSize}, byteOptions);
-    aclrtMemcpy(tiling.data_ptr(), tilingSize, &tilingData, tilingSize, ACL_MEMCPY_HOST_TO_DEVICE);
+    const auto copyStatus =
+        aclrtMemcpy(tiling.data_ptr(), tilingSize, &tilingData, tilingSize, ACL_MEMCPY_HOST_TO_DEVICE);
+    TORCH_CHECK(copyStatus == ACL_SUCCESS, "compressor tiling H2D copy failed, ACL error: ", copyStatus);
 
     const auto workspaceSize = static_cast<int64_t>(*context->GetWorkspaceSizes(1));
     at::Tensor workspace = at::empty({workspaceSize}, byteOptions);

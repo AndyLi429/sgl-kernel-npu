@@ -27,12 +27,12 @@ using namespace Compressor;
     } while (0)
 
 template <uint8_t XLayout, uint8_t XDType, uint8_t Coff, uint8_t CacheMode, uint8_t TemplateId, uint8_t GradEnabled>
-__global__ __aicore__ void compressor(__gm__ uint8_t *x, __gm__ uint8_t *wKv, __gm__ uint8_t *wGate,
-                                      __gm__ uint8_t *stateCache, __gm__ uint8_t *ape, __gm__ uint8_t *stateBlockTable,
-                                      __gm__ uint8_t *cuSeqlens, __gm__ uint8_t *seqUsed, __gm__ uint8_t *startPos,
-                                      __gm__ uint8_t *cmpKvOut, __gm__ uint8_t *stateCacheOut,
-                                      __gm__ uint8_t *softmaxScoreOut, __gm__ uint8_t *kvOut, __gm__ uint8_t *workspace,
-                                      __gm__ uint8_t *tiling)
+__schedmode__(1) __global__ __aicore__
+    void compressor(__gm__ uint8_t *x, __gm__ uint8_t *wKv, __gm__ uint8_t *wGate, __gm__ uint8_t *stateCache,
+                    __gm__ uint8_t *ape, __gm__ uint8_t *stateBlockTable, __gm__ uint8_t *cuSeqlens,
+                    __gm__ uint8_t *seqUsed, __gm__ uint8_t *startPos, __gm__ uint8_t *cmpKvOut,
+                    __gm__ uint8_t *stateCacheOut, __gm__ uint8_t *softmaxScoreOut, __gm__ uint8_t *kvOut,
+                    __gm__ uint8_t *workspace, __gm__ uint8_t *tiling)
 {
     REGISTER_TILING_DEFAULT(optiling::CompressorTilingData);
     KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);

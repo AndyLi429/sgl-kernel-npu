@@ -130,3 +130,127 @@ or real-device execution is claimed.
   cannot share an entry.
 - Verify the generated `aclrtlaunch_compressor.h` direct-launch ABI during the
   A5 build. That generated header is unavailable on this workstation.
+
+## Review fix round 1 (BLOCKED)
+
+Two review-required fixes are implemented and locally verified:
+
+- Added `__schedmode__(1)` to the direct-launch Compressor kernel entry. This
+  is the documented Kernel-direct equivalent of upstream
+  `context->SetScheduleMode(BATCH_MODE_SCHEDULE)`. It changes launch scheduling
+  metadata only; kernel math, VF code, and synchronization calls are unchanged.
+  The CANN Kernel-direct documentation specifically requires the
+  `__schedmode__(mode)` qualifier and recommends mode 1 for kernels with
+  cross-core synchronization in multi-stream execution:
+  <https://www.hiascend.com/document/detail/en/CANNCommunityEdition/900/programug/Ascendcopdevg/atlas_ascendc_10_10053.html>.
+- Captured the `aclrtMemcpy` return value and required `ACL_SUCCESS` before the
+  kernel launch. A failed tiling H2D copy therefore cannot fall through into a
+  launch with invalid tiling memory.
+
+The focused source-contract test was written before these changes. Its RED
+result was:
+
+```text
+test_direct_launch_uses_batch_schedule_mode ... FAIL
+test_tiling_copy_is_checked_before_kernel_launch ... ERROR
+Ran 2 tests
+FAILED (failures=1, errors=1)
+```
+
+After the two fixes, its GREEN result was:
+
+```text
+python -m unittest tests.python.sgl_kernel_npu.test_compressor_source_contract -v
+test_direct_launch_uses_batch_schedule_mode ... ok
+test_tiling_copy_is_checked_before_kernel_launch ... ok
+Ran 2 tests in 0.001s
+OK
+```
+
+### Exact dispatcher blocker
+
+Task 3 remains **BLOCKED** on template-kernel dispatch. The current wrapper
+computes a six-field template TilingKey, but the checked-in generic
+`EXEC_KERNEL_CMD` expands to:
+
+```text
+ACLRT_LAUNCH_KERNEL(kernel_name)(blockdim, acl_stream, params...)
+```
+
+It has no TilingKey, template-parameter, binary-handle, or function-handle
+argument. Therefore it cannot prove or request selection among the
+`compressor<XLayout, XDType, Coff, CacheMode, TemplateId, GradEnabled>` kernel
+instances. Passing the computed key to this generic macro would require
+inventing an ABI and is intentionally not done.
+
+The exact missing build product is the A5 CANN-generated
+`aclrtlaunch_compressor.h`, together with the matching compiled
+`workspace_kernel` launcher/object metadata that maps the Compressor template
+TilingKey to a concrete kernel instance. The source-only workstation has none
+of the following required evidence:
+
+- the declaration and argument order of `aclrtlaunch_compressor`;
+- the generated Compressor instance symbols/object metadata;
+- a generated dispatcher proving whether and how the TilingKey reaches those
+  instances.
+
+The upstream framework route does carry the key separately from `blockDim`:
+
+- `D:/GitCode/ops-transformer/attention/compressor/op_host/arch35/compressor_tiling.cpp`
+  computes `GET_TPL_TILING_KEY(...)`, then calls
+  `context->SetTilingKey(compressorContext.tilingKey)` and
+  `context->SetBlockDim(compressorContext.blockDim)`.
+- `D:/GitCode/ops-transformer/tests/ut/framework_special/stubs/runtime/runtime_stubs.cpp`
+  declares the corresponding runtime ABI as
+  `rtKernelLaunchWithHandleV2(void *hdl, const uint64_t tilingKey,
+  uint32_t blockDim, ...)` and also declares
+  `rtBinaryGetFunction(binHandle, tilingKey, funcHandle)`.
+
+This is evidence for the upstream binary-handle/template-key route, not
+authorization to call those runtime APIs from this repository: the direct
+static-library wrapper has neither the required binary handle nor a verified
+generated argument pack/config contract.
+
+Run this exact build and inspection on an A5 development host with the matching
+CANN toolkit and `torch-npu` installed:
+
+```bash
+ASCEND_HOME_PATH=/usr/local/Ascend/ascend-toolkit/latest \
+  bash build.sh -a kernels Ascend950PR_9599
+
+launcher_header="$(find build -type f -name aclrtlaunch_compressor.h -print -quit)"
+test -n "$launcher_header"
+sed -n '1,220p' "$launcher_header"
+
+find build -type f \
+  \( -name '*compressor*.o' -o -name '*compressor*.json' \
+     -o -name 'libworkspace_kernel.a' \) -print
+
+workspace_archive="$(find build -type f -name libworkspace_kernel.a -print -quit)"
+test -n "$workspace_archive"
+nm -A -C "$workspace_archive" | grep -i compressor
+```
+
+The generated header and symbol/metadata output must be inspected before
+changing the host call. If they do not expose a TilingKey-aware direct
+dispatcher, the build integration must use the upstream framework binary
+launcher route (or a CANN-supported generated equivalent); a generic direct
+launch is not sufficient. No Task 4 cache/capture work should proceed until
+this dispatch contract is resolved.
+
+The fresh local A5 build attempt confirms that those products cannot be
+generated in this environment:
+
+```text
+bash build.sh -a kernels Ascend950PR_9599
+Build target: kernels
+CMake SOC_VERSION: Ascend950PR_9599
+Error: Cannot find an Ascend toolkit directory containing set_env.sh
+```
+
+Files added or changed by review fix round 1:
+
+- `csrc/compressor/op_host/compressor.cpp`
+- `csrc/compressor/op_kernel/compressor.cpp`
+- `tests/python/sgl_kernel_npu/test_compressor_source_contract.py`
+- `.superpowers/sdd/2026-08-19-a5-compressor-operator-migration/task-3-report.md`
