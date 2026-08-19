@@ -1,4 +1,5 @@
 .vscode/
+.worktrees/
 **/build/
 **/__pycache__/
 **/build_out/
