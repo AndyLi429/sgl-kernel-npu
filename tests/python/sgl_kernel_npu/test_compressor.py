@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import sgl_kernel_npu  # noqa: F401
 import torch
 import torch_npu  # noqa: F401
@@ -11,6 +13,11 @@ def is_a5() -> bool:
 
 
 class TestCompressorSchema(TestCase):
+    def test_compressor_a5_sources_are_in_kernel_target(self):
+        cmake = Path("csrc/CMakeLists.txt").read_text()
+        self.assertIn("compressor/op_kernel/compressor.cpp", cmake)
+        self.assertIn("compressor/op_host/tiling/compressor_tiling.cpp", cmake)
+
     def test_compressor_schema_is_a5_only(self):
         if not is_a5():
             self.assertFalse(hasattr(torch.ops.npu, "compressor"))

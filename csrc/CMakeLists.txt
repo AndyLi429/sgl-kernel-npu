@@ -67,6 +67,11 @@ if(SGL_KERNEL_ENABLE_A3_ONLY_OPS)
         ${PROJECT_OP_SRC_BASE}/mega_chunk_gdn/op_host/mega_chunk_gdn.cpp
     )
 endif()
+if(SGL_KERNEL_ENABLE_A5_ONLY_OPS)
+    list(APPEND OP_SRCS
+        ${PROJECT_OP_SRC_BASE}/compressor/op_host/tiling/compressor_tiling.cpp
+    )
+endif()
 if(BUILD_CATLASS_MODULE)
     list(APPEND OP_SRCS
         ${PROJECT_OP_SRC_BASE}/catlass/op_host/catlass_matmul_basic.cpp
@@ -136,11 +141,17 @@ if(SGL_KERNEL_ENABLE_A3_ONLY_OPS)
         ${PROJECT_OP_SRC_BASE}/lightning_indexer/op_kernel/lightning_indexer_kernel.cpp
     )
 endif()
+if(SGL_KERNEL_ENABLE_A5_ONLY_OPS)
+    list(APPEND WORKSPACE_KERNEL_SRCS
+        ${PROJECT_OP_SRC_BASE}/compressor/op_kernel/compressor.cpp
+    )
+endif()
 
 ascendc_library(workspace_kernel STATIC ${WORKSPACE_KERNEL_SRCS})
 ascendc_include_directories(workspace_kernel PRIVATE
     ${PROJECT_OP_SRC_BASE}/causal_conv1d_update/op_kernel
     ${PROJECT_OP_SRC_BASE}/causal_conv1d/op_kernel
+    ${PROJECT_OP_SRC_BASE}/compressor/op_kernel
     ${PROJECT_OP_SRC_BASE}/utils/kernel
     ${PROJECT_OP_SRC_BASE}/sparse_attention_score/op_kernel
 )
