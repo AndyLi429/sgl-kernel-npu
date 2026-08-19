@@ -16,9 +16,12 @@ class TestCompressorSchema(TestCase):
             self.assertFalse(hasattr(torch.ops.npu, "compressor"))
             return
 
-        schema = torch.ops.npu.compressor.default._schema
-        self.assertIn("Tensor(a!) state_cache", str(schema))
-        self.assertIn("int cmp_ratio=4", str(schema))
+        schema = str(torch.ops.npu.compressor.default._schema)
+        self.assertIn("Tensor(a!) state_cache", schema)
+        self.assertIn("int cmp_ratio=4", schema)
+        self.assertIn("int coff=1", schema)
+        self.assertIn("int cache_mode=1", schema)
+        self.assertNotIn("stride", schema)
 
 
 if __name__ == "__main__":
