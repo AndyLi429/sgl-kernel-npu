@@ -38,15 +38,18 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> npu_hc_pre_v2(
     double norm_eps, double hc_eps)
 {
     check_inputs(x, hc_fn, hc_scale, hc_base, hc_mult);
-    const auto y_shape = x.dim() == 4 ? at::IntArrayRef({x.size(0), x.size(1), x.size(3)})
-                                      : at::IntArrayRef({x.size(0), x.size(2)});
-    const auto post_shape = x.dim() == 4 ? at::IntArrayRef({x.size(0), x.size(1), hc_mult})
-                                         : at::IntArrayRef({x.size(0), hc_mult});
-    const auto comb_shape = x.dim() == 4 ? at::IntArrayRef({x.size(0), x.size(1), hc_mult, hc_mult})
-                                         : at::IntArrayRef({x.size(0), hc_mult, hc_mult});
-    auto y = at::empty(y_shape, x.options());
-    auto post = at::empty(post_shape, x.options().dtype(at::kFloat));
-    auto comb = at::empty(comb_shape, x.options().dtype(at::kFloat));
+    at::Tensor y;
+    at::Tensor post;
+    at::Tensor comb;
+    if (x.dim() == 4) {
+        y = at::empty({x.size(0), x.size(1), x.size(3)}, x.options());
+        post = at::empty({x.size(0), x.size(1), hc_mult}, x.options().dtype(at::kFloat));
+        comb = at::empty({x.size(0), x.size(1), hc_mult, hc_mult}, x.options().dtype(at::kFloat));
+    } else {
+        y = at::empty({x.size(0), x.size(2)}, x.options());
+        post = at::empty({x.size(0), hc_mult}, x.options().dtype(at::kFloat));
+        comb = at::empty({x.size(0), hc_mult, hc_mult}, x.options().dtype(at::kFloat));
+    }
     EXEC_NPU_CMD<HC_PRE_OP_NAME>(x, hc_fn, hc_scale, hc_base, hc_mult,
                                  hc_sinkhorn_iters, hc_eps, norm_eps, y, post, comb);
     return {y, post, comb};
