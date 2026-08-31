@@ -257,6 +257,7 @@ target_link_libraries(${OP_PLUGIN_NAME} PRIVATE
         ${CATLASS_WORKSPACE_KERNEL_TARGETS}
         torch_npu
         ascendcl
+        opapi
         tiling_api
         register
         platform
