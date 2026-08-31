@@ -15,18 +15,23 @@
 #ifndef PYTORCH_NPU_HELPER_H
 #define PYTORCH_NPU_HELPER_H
 
-#include <ATen/Tensor.h>
+#include <ATen/ATen.h>
 #include <acl/acl_base.h>
 #include <acl/acl_rt.h>
 #include <aclnn/aclnn_base.h>
 #include <c10/util/Exception.h>
 #include <dlfcn.h>
-#include <torch/extension.h>
 #include <torch_npu/csrc/framework/utils/CalcuOpUtil.h>
 #include <torch_npu/csrc/framework/utils/OpAdapter.h>
 
+#include <array>
 #include <fstream>
+#include <initializer_list>
 #include <string>
+#include <tuple>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
 #include "torch_npu/csrc/aten/NPUNativeFunctions.h"
 #include "torch_npu/csrc/core/npu/NPUStream.h"
@@ -35,7 +40,7 @@
 #include "torch_npu/csrc/framework/interface/EnvVariables.h"
 #include "torch_npu/csrc/framework/utils/CalcuOpUtil.h"
 #include "torch_npu/csrc/framework/utils/OpPreparation.h"
-#include "find_op_path.h"
+#include "../attentions/csrc/plugin/find_op_path.h"
 
 #define NPU_NAME_SPACE at_npu::native
 
