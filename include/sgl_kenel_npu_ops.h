@@ -101,6 +101,11 @@ void sgemmc_shrink(at::Tensor &x, at::Tensor &weight, at::Tensor &lora_indices,
 at::Tensor apply_token_bitmask(at::Tensor logits, at::Tensor bitmask,
                                c10::optional<at::Tensor> indices);
 
+std::tuple<at::Tensor, at::Tensor, at::Tensor> npu_hc_pre_v2(
+    const at::Tensor &x, const at::Tensor &hc_fn, const at::Tensor &hc_scale,
+    const at::Tensor &hc_base, int64_t hc_mult, int64_t hc_sinkhorn_iters,
+    double norm_eps, double hc_eps);
+
 #ifdef SGL_KERNEL_ENABLE_A3_ONLY_OPS
 std::tuple<at::Tensor &, at::Tensor &, at::Tensor &, at::Tensor &>
 mla_preprocess(const at::Tensor &hiddenState, const at::Tensor &gamma0,

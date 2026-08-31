@@ -100,6 +100,8 @@ TORCH_LIBRARY_FRAGMENT(npu, m)
 
     m.def("apply_token_bitmask(Tensor logits, Tensor bitmask, Tensor? indices=None) -> Tensor");
 
+    m.def("npu_hc_pre_v2(Tensor x, Tensor hc_fn, Tensor hc_scale, Tensor hc_base, int hc_mult, int hc_sinkhorn_iters, float norm_eps, float hc_eps) -> (Tensor, Tensor, Tensor)");
+
     m.def(
         "causal_conv1d_update(Tensor x, Tensor weight, Tensor(a!) conv_state, "
         "Tensor conv_state_indices, Tensor? bias=None, Tensor? num_accepted_tokens=None, "
@@ -283,6 +285,8 @@ TORCH_LIBRARY_IMPL(npu, PrivateUse1, m)
         auto indices_or_empty = indices.has_value() ? *indices : at::empty({0}, logits.options().dtype(at::kInt));
         return sglang::npu_kernel::apply_token_bitmask(logits, bitmask, indices_or_empty);
     });
+
+    m.impl("npu_hc_pre_v2", TORCH_FN(sglang::npu_kernel::npu_hc_pre_v2));
 
 #ifdef SGL_KERNEL_ENABLE_A3_ONLY_OPS
     m.impl("unidex_copy", TORCH_FN(sglang::npu_kernel::unidex_copy));

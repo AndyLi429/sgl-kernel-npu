@@ -55,6 +55,7 @@ set(OP_SRCS
     ${PROJECT_OP_SRC_BASE}/compressor/op_host/compressor_tiling.cpp
     ${PROJECT_OP_SRC_BASE}/causal_conv1d_update/op_host/causal_conv1d_update.cpp
     ${PROJECT_OP_SRC_BASE}/apply_token_bitmask/op_host/apply_token_bitmask.cpp
+    ${PROJECT_OP_SRC_BASE}/hc_pre/op_host/hc_pre.cpp
     ${PROJECT_OP_SRC_BASE}/sparse_attn_sharedkv_metadata/op_host/sparse_attn_sharedkv_metadata.cpp
     ${PROJECT_OP_SRC_BASE}/sparse_attention_score/op_host/sparse_attention_score.cpp
     ${PROJECT_OP_SRC_BASE}/sparse_attention_score/op_host/tiling/sparse_attention_score_tiling.cpp

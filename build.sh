@@ -129,6 +129,7 @@ function configure_build_target()
             ;;
         kernels )
             BUILD_KERNELS_MODULE="ON"
+            BUILD_ATTENTIONS_MODULE="ON"
             ;;
         memory-saver )
             BUILD_MEMORY_SAVER_MODULE="ON"
@@ -469,6 +470,8 @@ function make_sgl_kernel_npu_package()
 {
     (
         cd "$PROJECT_ROOT/python/sgl_kernel_npu"
+        rm -rf sgl_kernel_npu/ops
+        cp -a "$PROJECT_ROOT/python/attentions/attentions/ops" sgl_kernel_npu/
         rm -rf dist
         cp -v "$PROJECT_ROOT/config.ini" sgl_kernel_npu/
         python3 setup.py clean --all
