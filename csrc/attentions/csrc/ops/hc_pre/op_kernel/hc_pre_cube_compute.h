@@ -459,8 +459,8 @@ __aicore__ inline void HC_PRE_CUBE_COMPUTE_TEMPLATE_CLASS::MmadAB(
 {
     SetFlag<HardEvent::MTE1_M>(MTE1_M_EVENT);
     WaitFlag<HardEvent::MTE1_M>(MTE1_M_EVENT);
-    AscendC::SetHF32Mode(0);
-    AscendC::SetHF32TransMode(0);
+    AscendC::SetHF32Mode(1);
+    AscendC::SetHF32TransMode(1);
     MmadParams mmadParams;
     mmadParams.m = CeilAlign(mmParams.curML1, BLOCK_CUBE);
     mmadParams.n = mmParams.curNL1;
@@ -474,7 +474,6 @@ __aicore__ inline void HC_PRE_CUBE_COMPUTE_TEMPLATE_CLASS::MmadAB(
         l0b_[(l0bLoopIdx_ % L0AB_BUF_NUM) * L0AB_BUF_OFFSET],
         mmadParams);
     AscendC::SetHF32Mode(0);
-    AscendC::SetHF32TransMode(0);
 }
 
 }  // namespace HcPre

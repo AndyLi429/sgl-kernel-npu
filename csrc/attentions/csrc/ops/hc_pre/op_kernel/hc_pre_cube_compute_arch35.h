@@ -84,8 +84,9 @@ namespace HcPreNs
             AscendC::SetFlag<AscendC::HardEvent::M_MTE1>(3);
             AscendC::SetFlag<AscendC::HardEvent::M_MTE1>(4);
 
-            AscendC::SetHF32Mode(0);
-            AscendC::SetHF32TransMode(0);
+            // hf32 compute
+            AscendC::SetHF32Mode(1);
+            AscendC::SetHF32TransMode(1);
         }
 
         __aicore__ inline void CopyInB1Nd2Nz(uint64_t k, uint64_t currentK, uint64_t baseN, const AscendC::GlobalTensor<float> &bGlobal,
@@ -234,7 +235,6 @@ namespace HcPreNs
             AscendC::WaitFlag<AscendC::HardEvent::M_MTE1>(3);
             AscendC::WaitFlag<AscendC::HardEvent::M_MTE1>(4);
             AscendC::SetHF32Mode(0);
-            AscendC::SetHF32TransMode(0);
         }
     };
 }

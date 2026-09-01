@@ -15,6 +15,8 @@ MIX_HC = 24
 HC_SINKHORN_ITERS = 20
 NORM_EPS = 1e-6
 HC_EPS = 1e-6
+HF32_MANTISSA_BITS = 10
+FP32_MANTISSA_BITS = 23
 Y_DIFF_THRESHOLD = 4e-3
 Y_REQUIRED_PASS_RATE = 0.98
 AUX_DIFF_THRESHOLD = 1e-4
@@ -32,11 +34,17 @@ def make_hc_pre_inputs(shape):
     return x, hc_fn, hc_scale, hc_base
 
 
+def to_hf32(tensor):
+    dropped_mantissa_bits = FP32_MANTISSA_BITS - HF32_MANTISSA_BITS
+    mantissa_mask = ~((1 << dropped_mantissa_bits) - 1)
+    return (tensor.contiguous().view(torch.int32) & mantissa_mask).view(torch.float32)
+
+
 def hc_pre_reference(x, hc_fn, hc_scale, hc_base):
     x_float = x.float()
     x_flat = x_float.flatten(-2)
     inv_rms = torch.rsqrt(x_flat.square().mean(-1, keepdim=True) + NORM_EPS)
-    mixes = F.linear(x_flat, hc_fn) * inv_rms
+    mixes = F.linear(to_hf32(x_flat), to_hf32(hc_fn)) * inv_rms
     pre, post, comb = mixes.split([HC_MULT, HC_MULT, HC_MULT * HC_MULT], dim=-1)
     comb = comb.unflatten(-1, (HC_MULT, HC_MULT))
 
