@@ -58,7 +58,12 @@ class TestHcPre(unittest.TestCase):
                 )
 
                 for result, golden in zip(actual, expected):
-                    torch.testing.assert_close(result.cpu().float(), golden.float(), rtol=4e-3, atol=4e-3)
+                    if result.dtype == torch.bfloat16:
+                        # The fused kernel writes y as BF16 after FP32 accumulation.
+                        rtol, atol = 1e-2, 3.125e-2
+                    else:
+                        rtol, atol = 4e-3, 4e-3
+                    torch.testing.assert_close(result.cpu().float(), golden.float(), rtol=rtol, atol=atol)
 
 
 if __name__ == "__main__":
