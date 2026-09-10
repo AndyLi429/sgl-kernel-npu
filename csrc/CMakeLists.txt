@@ -182,6 +182,8 @@ endif()
 
 ascendc_library(workspace_kernel STATIC ${WORKSPACE_KERNEL_SRCS})
 ascendc_include_directories(workspace_kernel PRIVATE
+    ${ASCEND_INCLUDE_DIR}
+    ${ASCEND_CANN_PACKAGE_PATH}/include
     ${PROJECT_OP_SRC_BASE}/causal_conv1d_update/op_kernel
     ${PROJECT_OP_SRC_BASE}/causal_conv1d/op_kernel
     ${PROJECT_OP_SRC_BASE}/compressor/op_kernel
