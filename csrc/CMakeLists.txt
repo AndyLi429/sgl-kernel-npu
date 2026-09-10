@@ -188,6 +188,7 @@ ascendc_include_directories(workspace_kernel PRIVATE
     ${PROJECT_OP_SRC_BASE}/causal_conv1d/op_kernel
     ${PROJECT_OP_SRC_BASE}/compressor/op_kernel
     ${PROJECT_OP_SRC_BASE}/utils/kernel
+    ${PROJECT_OP_SRC_BASE}/attentions/csrc/ops/utils/inc/kernel
     ${PROJECT_OP_SRC_BASE}/sparse_attention_score/op_kernel
     ${PROJECT_OP_SRC_BASE}/kv_compress_epilog/op_kernel
     ${PROJECT_OP_SRC_BASE}/kv_quant_sparse_attn_sharedkv/op_kernel
