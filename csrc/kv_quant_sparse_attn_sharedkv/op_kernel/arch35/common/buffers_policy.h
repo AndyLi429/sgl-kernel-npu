@@ -100,7 +100,7 @@ public:
         }
     }
 
-
+    __aicore__ inline Buffer<bufferType, syncType> &GetReused(bool isNextS2IdxNoChange) {
         if (isNextS2IdxNoChange) {
             if (flag2_ == 0) {
                 return pong_;

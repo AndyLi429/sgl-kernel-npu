@@ -252,6 +252,7 @@ private:
     TEventID p2cEventId_;
     TEventID c2pEventId_;
     uint32_t id0_;
+    uint32_t id1_;
 };
 }
 #endif
