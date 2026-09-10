@@ -83,6 +83,17 @@ endif()
 if(SGL_KERNEL_ENABLE_A5_ONLY_OPS)
     list(APPEND OP_SRCS
         ${PROJECT_OP_SRC_BASE}/kv_compress_epilog/op_host/kv_compress_epilog.cpp
+        ${PROJECT_OP_SRC_BASE}/kv_quant_sparse_attn_sharedkv/op_host/kv_quant_sparse_attn_sharedkv.cpp
+        ${PROJECT_OP_SRC_BASE}/kv_quant_sparse_attn_sharedkv/op_host/kv_quant_sparse_attn_sharedkv_tiling.cpp
+        ${PROJECT_OP_SRC_BASE}/kv_quant_sparse_attn_sharedkv/op_host/kv_quant_sparse_attn_sharedkv_check.cpp
+        ${PROJECT_OP_SRC_BASE}/kv_quant_sparse_attn_sharedkv/op_host/kv_quant_sparse_attn_sharedkv_check_consistancy.cpp
+        ${PROJECT_OP_SRC_BASE}/kv_quant_sparse_attn_sharedkv/op_host/kv_quant_sparse_attn_sharedkv_check_existance.cpp
+        ${PROJECT_OP_SRC_BASE}/kv_quant_sparse_attn_sharedkv/op_host/kv_quant_sparse_attn_sharedkv_check_feature.cpp
+        ${PROJECT_OP_SRC_BASE}/kv_quant_sparse_attn_sharedkv/op_host/kv_quant_sparse_attn_sharedkv_check_single_para.cpp
+        ${PROJECT_OP_SRC_BASE}/kv_quant_sparse_attn_sharedkv/op_host/kv_quant_sparse_attn_sharedkv_def.cpp
+        ${PROJECT_OP_SRC_BASE}/kv_quant_sparse_attn_sharedkv/op_host/kv_quant_sparse_attn_sharedkv_proto.cpp
+        ${PROJECT_OP_SRC_BASE}/kv_quant_sparse_attn_sharedkv_metadata/op_host/kv_quant_sparse_attn_sharedkv_metadata.cpp
+        ${PROJECT_OP_SRC_BASE}/kv_quant_sparse_attn_sharedkv_metadata/op_host/kv_quant_sparse_attn_sharedkv_metadata_infershape.cpp
     )
 endif()
 if(BUILD_CATLASS_MODULE)
@@ -165,6 +176,7 @@ endif()
 if(SGL_KERNEL_ENABLE_A5_ONLY_OPS)
     list(APPEND WORKSPACE_KERNEL_SRCS
         ${PROJECT_OP_SRC_BASE}/kv_compress_epilog/op_kernel/kv_compress_epilog.cpp
+        ${PROJECT_OP_SRC_BASE}/kv_quant_sparse_attn_sharedkv/op_kernel/kv_quant_sparse_attn_sharedkv.cpp
     )
 endif()
 
@@ -176,12 +188,28 @@ ascendc_include_directories(workspace_kernel PRIVATE
     ${PROJECT_OP_SRC_BASE}/utils/kernel
     ${PROJECT_OP_SRC_BASE}/sparse_attention_score/op_kernel
     ${PROJECT_OP_SRC_BASE}/kv_compress_epilog/op_kernel
+    ${PROJECT_OP_SRC_BASE}/kv_quant_sparse_attn_sharedkv/op_kernel
+    ${PROJECT_OP_SRC_BASE}/kv_quant_sparse_attn_sharedkv/op_kernel/arch35
+    ${PROJECT_OP_SRC_BASE}/kv_quant_sparse_attn_sharedkv/op_kernel/arch35/common
+    ${PROJECT_OP_SRC_BASE}/kv_quant_sparse_attn_sharedkv/op_host
+    ${PROJECT_OP_SRC_BASE}/kv_quant_sparse_attn_sharedkv_metadata/op_host
 )
 
 ascendc_compile_definitions(workspace_kernel PRIVATE
     -DHAVE_WORKSPACE
     -DHAVE_TILING
 )
+
+if(SGL_KERNEL_ENABLE_A5_ONLY_OPS)
+    ascendc_compile_options(workspace_kernel PRIVATE
+        --cce-auto-sync=off
+        -Wno-deprecated-declarations
+        -mllvm
+        -cce-vf-remove-membar=false
+        -mllvm
+        -cce-aicore-hoist-movemask=false
+    )
+endif()
 
 # Build catlass kernel in its own target (no sparse_attention_score include dir),
 # so catlass's #include "tla/layout.hpp" resolves to its own copy and avoids
