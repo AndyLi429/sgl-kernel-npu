@@ -98,6 +98,7 @@ private:
 
 
     BuffersPolicySingleBuffer<BufferType::L1> l1QBuffers;
+    BuffersPolicy3buff<BufferType::L1> l1KBuffers;
 
 
 
@@ -146,6 +147,7 @@ __aicore__ inline void SCFABlockCube<TEMPLATE_ARGS>::InitLocalBuffer()
     l1KBuffers.Init((*l1BufferManagerPtr), mm1RightSize);
 
 
+    l0aBufferManager.Init(tPipe, L0AB_SHARED_SIZE_64K);
     l0bBufferManager.Init(tPipe, L0AB_SHARED_SIZE_64K);
     l0cBufferManager.Init(tPipe, L0C_SHARED_SIZE_256K);
 
@@ -173,7 +175,7 @@ TEMPLATES_DEF_NO_DEFAULT
 __aicore__ inline void SCFABlockCube<TEMPLATE_ARGS>::CalcS1Coord(RunInfo &runInfo,
     ConstInfo &constInfo)
 {
-
+    coordInfo[runInfo.taskIdMod3].s1Coord = runInfo.s1oIdx * runInfo.qSNumInOneBlock;
 }
 
 TEMPLATES_DEF_NO_DEFAULT
@@ -208,6 +210,7 @@ __aicore__ inline void SCFABlockCube<TEMPLATE_ARGS>::IterateBmm1SCFA(
 
 
     if (unlikely(runInfo.s2LoopCount == 0)) {
+        inputLeftBuf = l1QBuffers.Get();
         inputLeftBuf.Wait<HardEvent::MTE1_MTE2>();
         LocalTensor<Q_T> inputLeftTensor = inputLeftBuf.GetTensor<Q_T>();
 
@@ -217,9 +220,11 @@ __aicore__ inline void SCFABlockCube<TEMPLATE_ARGS>::IterateBmm1SCFA(
             constInfo.mm1Ka);
 
         inputLeftBuf.Set<HardEvent::MTE2_MTE1>();
+    } else {
         inputLeftBuf = l1QBuffers.GetPre();
 
         inputLeftBuf.Set<HardEvent::MTE2_MTE1>();
+    }
 
 
     inputRightBuf.WaitCrossCore();
@@ -238,6 +243,7 @@ __aicore__ inline void SCFABlockCube<TEMPLATE_ARGS>::IterateBmm1SCFA(
     inputLeftBuf.Wait<HardEvent::MTE2_MTE1>();
     Buffer<BufferType::L0C> mm1ResL0C = mmL0CBuffers.Get();
     mm1ResL0C.Wait<HardEvent::FIX_M>();
+    MMParam param = {static_cast<uint32_t>(runInfo.mRealSize),
                      static_cast<uint32_t>(runInfo.s2RealSize),  // singleN
                      static_cast<uint32_t>(constInfo.dSize),   // singleK
                      0,    // isLeftTranspose
@@ -253,12 +259,16 @@ __aicore__ inline void SCFABlockCube<TEMPLATE_ARGS>::IterateBmm1SCFA(
     }
 
     mm1ResL0C.Set<HardEvent::M_FIX>();
+    mm1ResL0C.Wait<HardEvent::M_FIX>();
 
     outputBuf.WaitCrossCore();
     FixpipeParamsC310<CO2Layout::ROW_MAJOR> fixpipeParams;
     fixpipeParams.nSize = Align8Func(runInfo.s2RealSize);
     fixpipeParams.mSize = Align2Func(runInfo.mRealSize);
     fixpipeParams.srcStride = Align16Func(fixpipeParams.mSize);
+    fixpipeParams.dstStride = s2BaseSize;
+    fixpipeParams.dualDstCtl = 1;
+    fixpipeParams.params.ndNum = 1;
     fixpipeParams.params.srcNdStride = 0;
     fixpipeParams.params.dstNdStride = 0;
 
@@ -274,9 +284,11 @@ __aicore__ inline void SCFABlockCube<TEMPLATE_ARGS>::IterateBmm2SCFA(Buffer<Buff
     ConstInfo &constInfo)
 {
     Buffer<BufferType::L1, SyncType::CROSS_CORE_SYNC_FORWARD> inputLeftBuf = inputLeftBuffers.Get();
+    inputLeftBuf.WaitCrossCore();
 
     Buffer<BufferType::L0C> mm2ResL0C = mmL0CBuffers.Get();
     mm2ResL0C.Wait<HardEvent::FIX_M>();
+    MMParam param = {static_cast<uint32_t>(s1BaseSize),
                      static_cast<uint32_t>(constInfo.dSizeV), // singleN 512
                      static_cast<uint32_t>(runInfo.s2RealSize), // singleK 128
                      0,    // isLeftTranspose
@@ -291,10 +303,13 @@ __aicore__ inline void SCFABlockCube<TEMPLATE_ARGS>::IterateBmm2SCFA(Buffer<Buff
         param);
 
     mm2ResL0C.Set<HardEvent::M_FIX>();
+    mm2ResL0C.Wait<HardEvent::M_FIX>();
     outputBuf.WaitCrossCore();
+    FixpipeParamsC310<CO2Layout::ROW_MAJOR> fixpipeParams;
     fixpipeParams.nSize = Align8Func(constInfo.dSizeV);
     fixpipeParams.mSize = s1BaseSize;
     fixpipeParams.srcStride = Align16Func(s1BaseSize);
+    fixpipeParams.dstStride = Align16Func(constInfo.dSizeV);
     fixpipeParams.dualDstCtl = 1;
     fixpipeParams.params.ndNum = 1;
     fixpipeParams.params.srcNdStride = 0;
