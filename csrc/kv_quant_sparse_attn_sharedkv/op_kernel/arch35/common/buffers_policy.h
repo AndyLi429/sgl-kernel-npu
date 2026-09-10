@@ -347,6 +347,7 @@ public:
 
     __aicore__ inline Buffer<bufferType, syncType> &PeekNextK() {
         return PeekBuffer(amIdx_, (1 - akIdx_));
+    }
 private:
     __aicore__ inline Buffer<bufferType, syncType> &GetBuffer(int32_t xIdx, int32_t &mIdx, int32_t &kIdx) {
 
