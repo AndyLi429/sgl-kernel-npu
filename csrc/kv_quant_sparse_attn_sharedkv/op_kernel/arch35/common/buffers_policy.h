@@ -120,6 +120,7 @@ private:
 };
 
 
+template<BufferType bufferType, SyncType syncType = SyncType::INNER_CORE_SYNC>
 class BuffersPolicy3buff {
 public:
     __aicore__ inline void Init(BufferManager<bufferType> &bufferManager, uint32_t size) {
@@ -181,7 +182,7 @@ public:
         }
     }
 
-
+    __aicore__ inline Buffer<bufferType, syncType> &GetPre() {
         if (flag1_ == 0) {
             return c_;
         } else if (flag1_ == 1) {
@@ -191,7 +192,7 @@ public:
         }
     }
 
-
+    __aicore__ inline Buffer<bufferType, syncType> &GetReused() {
         if (flag2_ == 0) {
             flag2_ = 1;
             return a_;
@@ -214,6 +215,7 @@ private:
 };
 
 
+template<BufferType bufferType, SyncType syncType = SyncType::INNER_CORE_SYNC>
 class BuffersPolicy4buff {
 public:
     __aicore__ inline void Init(BufferManager<bufferType> &bufferManager, uint32_t size) {
@@ -281,6 +283,7 @@ private:
     uint32_t tail_ = 0;
     uint32_t head_ = 0;
     uint32_t used_ = 0;
+};
 
 template<BufferType bufferType, SyncType syncType = SyncType::INNER_CORE_SYNC>
 class Matrix2x2BufferPolicy { // 4buffer

@@ -13,9 +13,9 @@
  * \brief
  */
 
+#include "kv_quant_sparse_attn_sharedkv_template_tiling_key.h"
 #include "kernel_operator.h"
 #include "lib/matmul_intf.h"
-#include "kv_quant_sparse_attn_sharedkv_template_tiling_key.h"
 #include "arch35/kv_quant_sparse_attn_sharedkv_scfa_kernel.h"
 #include "kv_quant_sparse_attn_sharedkv_common.h"
 
