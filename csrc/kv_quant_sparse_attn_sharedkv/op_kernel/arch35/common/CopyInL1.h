@@ -226,7 +226,9 @@ __aicore__ inline void CopyToL1Nd2Nz(const LocalTensor<INPUT_T> &l1Tensor, const
     }
 #else
     gm2L1Nd2NzParams.dstNzC0Stride = (nValue + 15) >> 4 << 4;
+#endif
     gm2L1Nd2NzParams.dstNzNStride = 1;
+    gm2L1Nd2NzParams.dstNzMatrixStride = 0;
     DataCopy(l1Tensor, gmTensor, gm2L1Nd2NzParams);
 }
 
@@ -244,10 +246,14 @@ __aicore__ inline void CopyToL1Nd2NzGS1Merge(const LocalTensor<INPUT_T> &l1Tenso
     if constexpr (IsSameType<INPUT_T, fp8_e5m2_t>::value || IsSameType<INPUT_T, fp8_e4m3fn_t>::value ||
         IsSameType<INPUT_T, hifloat8_t>::value) {
         gm2L1Nd2NzParams.dstNzC0Stride = (dstNzC0Stride + 31) >> 5 << 5;
+    } else {
         gm2L1Nd2NzParams.dstNzC0Stride = (dstNzC0Stride + 15) >> 4 << 4;
+    }
 #else
     gm2L1Nd2NzParams.dstNzC0Stride = (dstNzC0Stride + 15) >> 4 << 4;
+#endif
     gm2L1Nd2NzParams.dstNzNStride = 1;
+    gm2L1Nd2NzParams.dstNzMatrixStride = nValue * 32 / sizeof(INPUT_T);
     DataCopy(l1Tensor, gmTensor, gm2L1Nd2NzParams);
 }
 #endif
