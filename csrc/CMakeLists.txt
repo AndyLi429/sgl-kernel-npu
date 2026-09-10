@@ -206,8 +206,6 @@ if(SGL_KERNEL_ENABLE_A5_ONLY_OPS)
         -Wno-deprecated-declarations
         -mllvm
         -cce-vf-remove-membar=false
-        -mllvm
-        -cce-aicore-hoist-movemask=false
     )
 endif()
 
