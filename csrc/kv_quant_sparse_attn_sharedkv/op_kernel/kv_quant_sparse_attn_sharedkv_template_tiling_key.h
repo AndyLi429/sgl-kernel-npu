@@ -16,6 +16,8 @@
 #ifndef KV_QUANT_SPARSE_ATTN_SHARED_TEMPLATE_TILING_KEY_H
 #define KV_QUANT_SPARSE_ATTN_SHARED_TEMPLATE_TILING_KEY_H
 
+#include <stdio.h>
+
 #include "ascendc/host_api/tiling/template_argument.h"
 
 #define SAS_LAYOUT_BSND 0
