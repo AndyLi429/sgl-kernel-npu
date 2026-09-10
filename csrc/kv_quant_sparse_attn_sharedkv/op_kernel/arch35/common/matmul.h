@@ -49,6 +49,7 @@ struct MMParam {
 
 
     uint32_t realM = 0;
+};
 
 enum class ABLayout {
     MK = 0,
@@ -78,10 +79,12 @@ __aicore__ inline uint32_t GetBlockNum(uint32_t size) {
     }
 }
 
+template <typename T>
 __aicore__ inline void LoadDataToL0A(LocalTensor<T>& aL0Tensor, const LocalTensor<T>& aL1Tensor,
                                     const MMParam& mmParam, uint64_t L1Aoffset, uint32_t kSplitSize, uint32_t mSplitSize)
 {
     LoadData2DParamsV2 loadData2DParamsA;
+    loadData2DParamsA.mStartPosition = 0;
     loadData2DParamsA.kStartPosition = 0;
     loadData2DParamsA.ifTranspose = mmParam.isLeftTranspose;
     if (loadData2DParamsA.ifTranspose) {
@@ -100,8 +103,7 @@ __aicore__ inline void LoadDataToL0A(LocalTensor<T>& aL0Tensor, const LocalTenso
         }
     }
     if constexpr (IsSameType<T, fp8_e5m2_t>::value || IsSameType<T, fp8_e4m3fn_t>::value || IsSameType<T, hifloat8_t>::value) {
-
-
+        loadData2DParamsA.srcStride = loadData2DParamsA.ifTranspose ? ((kSplitSize + 63) >> 6 << 6) / 16 : ((mSplitSize + 31) >> 5 << 5) / 16;
     } else {
         loadData2DParamsA.srcStride = loadData2DParamsA.ifTranspose ? ((mmParam.singleK + 15) >> 4 << 4) / 16 : loadData2DParamsA.mStep;
     }
@@ -113,10 +115,12 @@ __aicore__ inline void LoadDataToL0A(LocalTensor<T>& aL0Tensor, const LocalTenso
 }
 
 
+template <typename T>
 __aicore__ inline void LoadDataToL0B(LocalTensor<T>& bL0Tensor, const LocalTensor<T>& bL1Tensor,
                                     const MMParam& mmParam, uint64_t L1Boffset, uint32_t kSplitSize, uint32_t nSplitSize, int nLoops = 1)
 {
     LoadData2DParamsV2 loadData2DParamsB;
+    loadData2DParamsB.mStartPosition = 0;
     loadData2DParamsB.kStartPosition = 0;
     loadData2DParamsB.ifTranspose = !mmParam.isRightTranspose;
     if (loadData2DParamsB.ifTranspose) {
@@ -441,15 +445,19 @@ __aicore__ inline void MatmulKM(const LocalTensor<A> &aL1Tensor,
             mSplitSize = (m == (mLoops - 1)) ? mplitTailSize : mSplitSize;
             Buffer<BufferType::L0A> l0aBuffer = aL0BuffsDb.Get();
             l0aBuffer.Wait<HardEvent::M_MTE1>();
+            LocalTensor<A> L0ATensor = l0aBuffer.GetTensor<A>();
             LoadDataToL0A(L0ATensor, aL1Tensor, param,
                 k * param.singleM * kSplitSize + m * kSplitSize * mSplitSize,
                 kSplitSize, mSplitSize);
             l0aBuffer.Set<HardEvent::MTE1_M>();
+            l0aBuffer.Wait<HardEvent::MTE1_M>();
 
             Buffer<BufferType::L0B> l0bBuffer = bL0BuffsDb.Get();
             l0bBuffer.Wait<HardEvent::M_MTE1>();
+            LocalTensor<B> L0BTensor = l0bBuffer.GetTensor<B>();
             LoadDataToL0B(L0BTensor, bL1Tensor, param, k * L1Boffset, kSplitSize, param.singleN);
             l0bBuffer.Set<HardEvent::MTE1_M>();
+            l0bBuffer.Wait<HardEvent::MTE1_M>();
 
             MmadParams mmadParams;
             mmadParams.m = mSplitSize;
@@ -606,8 +614,10 @@ __aicore__ inline void LoadDataToL0B(LocalTensor<T>& bL0Tensor, const LocalTenso
         loadData2DParams.ifTranspose = false;
         if(rowSize == kSplitSize) {
             loadData2DParams.repeatTimes = ((nSplitSize + ONE_FRACTAL_H_ELEMENT - 1) / ONE_FRACTAL_H_ELEMENT) * (kSplitSize / blockElementCnt);
+            LoadData(bL0Tensor, bL1Tensor, loadData2DParams);
         } else {
             loadData2DParams.repeatTimes = (nSplitSize + ONE_FRACTAL_H_ELEMENT - 1) / ONE_FRACTAL_H_ELEMENT;
+            uint32_t loopTimes = kSplitSize / blockElementCnt;
             uint64_t l1Offset = nSplitSize * blockElementCnt;
             uint64_t l0Offset = rowSize * blockElementCnt;
             for (uint32_t loop = 0; loop < loopTimes; loop++) {

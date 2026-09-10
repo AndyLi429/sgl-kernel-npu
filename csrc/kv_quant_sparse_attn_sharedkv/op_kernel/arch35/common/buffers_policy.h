@@ -387,6 +387,7 @@ private:
     // Alloc
     int32_t aIdx_ = -1;
     int32_t amIdx_ = 0;
+    int32_t akIdx_ = 0;
     // Reuse
     int32_t uIdx_ = -1;
     int32_t umIdx_ = 0;
