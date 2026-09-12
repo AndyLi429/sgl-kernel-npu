@@ -18,9 +18,8 @@
 # truncated 1/448 bit pattern, mode 2 works entirely in the bf16 exponent domain, and mode 3 scales
 # against 448.0 regardless of dst_type. Comparing against a textbook reference would fail.
 #
-# Two of the op's arguments are accepted but inert by the ported tiling and are covered as such:
-# `group_size` never reaches the tiling math (upstream declares and never reads it), and `round_scale`
-# only affects mode 3.
+# Two of the op's arguments are accepted but inert by the tiling and are covered as such:
+# `group_size` never reaches the tiling math, and `round_scale` only affects mode 3.
 
 import struct
 import unittest

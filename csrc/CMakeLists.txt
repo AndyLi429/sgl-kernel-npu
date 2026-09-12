@@ -247,14 +247,14 @@ if(SGL_KERNEL_ENABLE_A3_ONLY_OPS)
 endif()
 
 # Dedicated A5-only kernel targets. swiglu_group_quant is MicroAPI (register-level) code, so it is
-# built with the options its upstream CANN op used rather than the workspace_kernel defaults:
-# automatic synchronization insertion (--cce-auto-sync) is unsound around MicroAPI's hand-managed
-# sync, and cce-aicore-hoist-movemask is likewise disabled upstream. It is kept off workspace_kernel
-# so these options cannot affect the other A5 kernels.
+# built with these options rather than the workspace_kernel defaults: automatic synchronization
+# insertion (--cce-auto-sync) is unsound around MicroAPI's hand-managed sync, and
+# cce-aicore-hoist-movemask must stay off. It is kept off workspace_kernel so these options cannot
+# affect the other A5 kernels.
 #
-# Upstream also passes --op_relocatable_kernel_binary=true, but that is deliberately omitted: it is
-# an op-package option, consumed by CANN's add_ops_compile_options op build, and the kernel compile
-# driver here rejects it ("unsupport option"). Nothing in a bare ascendc_library compile needs it.
+# --op_relocatable_kernel_binary=true is deliberately NOT passed. It is an op-package option,
+# consumed by CANN's op build, and the kernel compile driver here rejects it ("unsupport option");
+# nothing in a bare ascendc_library compile needs it.
 set(A5_ONLY_KERNEL_TARGETS)
 if(SGL_KERNEL_ENABLE_A5_ONLY_OPS)
     ascendc_library(swiglu_group_quant_kernel STATIC

@@ -12,21 +12,16 @@
  * \file swiglu_group_quant.cpp
  * \brief swiglu_group_quant kernel entry (A5-only).
  *
- * Adapted from vllm-ascend csrc/moe/swiglu_group_quant/op_kernel/swiglu_group_quant.cpp.
- *
  * The three op classes and their shared helpers (swiglu_group_quant_base.h, *_perf.h,
- * swiglu_fp8_quant_per_token.h) are copied verbatim from upstream — see the note at the top of
- * each. Only this entry differs, because this repo has no CANN op registry:
+ * swiglu_fp8_quant_per_token.h) live alongside this file. This entry does nothing but dispatch:
  *
- *   - upstream's GET_TILING_DATA(tilingData, tiling) is replaced by the field-by-field copy that
- *     kv_compress_epilog uses. GET_TILING_DATA expands to a struct-by-value copy out of a __gm__
- *     pointer, which A5 rejects ("argument is in address space gm, but parameter must be in Local
- *     Memory"), and GET_TILING_DATA_WITH_STRUCT cannot take a namespaced type name.
- *   - upstream's TILING_KEY_IS(...) (a framework macro) is replaced by a plain comparison against
- *     a tilingKey field carried in the packed struct.
- *   - upstream's DTYPE_X / DTYPE_Y / DTYPE_SCALE are build-time -D defines set per compiled
- *     op binary, one binary per dtype combination. This repo builds a single kernel, so the dtype
- *     combination is carried in the struct's `dtype` field and dispatched here at runtime.
+ *   - Tiling arrives as a packed struct memcpy'd to GM and is copied field-by-field below.
+ *     GET_TILING_DATA expands to a struct-by-value copy out of a __gm__ pointer, which A5 rejects
+ *     ("argument is in address space gm, but parameter must be in Local Memory"), and
+ *     GET_TILING_DATA_WITH_STRUCT cannot take a namespaced type name.
+ *   - The tiling key is a plain field in that struct, compared directly.
+ *   - x/y/scale dtypes are carried in the struct's `dtype` field and dispatched at runtime, since
+ *     this repo builds one kernel rather than one binary per dtype combination.
  *
  * The dispatch covers every (tiling key, dtype) combination the host can produce. scale dtype is
  * implied by the quant mode for keys 1 and 2 (fp32 and e8m0 respectively), and is selected by
@@ -51,8 +46,8 @@ using namespace AscendC;
 
 namespace {
 
-// Shorthands so the dispatch below stays readable. Each expands to the upstream entry's
-// "construct / Init / Process" sequence with the class's template parameters filled in.
+// Shorthands so the dispatch below stays readable. Each expands to the "construct / Init / Process"
+// sequence with the class's template parameters filled in.
 #define SWIGLU_GROUP_QUANT_RUN_GROUP(XT, YT)                                        \
     do {                                                                            \
         SwigluGroupQuant::SwigluGroupQuantPerf<XT, YT, float> op;                   \
@@ -130,7 +125,7 @@ extern "C" __global__ __aicore__ void swiglu_group_quant(GM_ADDR x, GM_ADDR topk
     const bool yE5m2 = (dtype & sglang::SWIGLU_GROUP_QUANT_DTYPE_Y_E5M2) != 0;
     const bool scaleE8m0 = (dtype & sglang::SWIGLU_GROUP_QUANT_DTYPE_SCALE_E8M0) != 0;
 
-    // Upstream saves and restores the overflow mode around the whole dispatch; each class's Init
+    // The overflow mode is saved and restored around the whole dispatch; each class's Init
     // additionally forces it to saturation (0), which is what the fp8 casts need.
     int64_t oriOverflowMode = AscendC::GetCtrlSpr<FLOAT_OVERFLOW_MODE_CTRL, FLOAT_OVERFLOW_MODE_CTRL>();
 

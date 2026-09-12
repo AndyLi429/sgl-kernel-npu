@@ -12,27 +12,15 @@
  * \file swiglu_group_quant.cpp
  * \brief Host-side tiling + launch for swiglu_group_quant (A5-only).
  *
- * Adapted from vllm-ascend csrc/moe/swiglu_group_quant/op_host/swiglu_group_quant_tiling.cpp and
- * csrc/torch_binding.cpp. The tiling arithmetic below is a 1:1 transcription of upstream's
- * SwigluGroupQuantTiling class — same constants, same branches, same order of operations. What
- * changes is the plumbing:
+ * Each quant mode has its own tiling routine below; all three share a head that splits the batch
+ * across cores. The result is written into a packed struct that is memcpy'd to the device, and the
+ * kernel entry dispatches on the tiling key and dtype that struct carries.
  *
- *   - upstream is a CANN optiling entry point driven by gert::TilingContext (shape descriptors,
- *     attribute pointers, SetBlockDim/SetTilingKey/GetWorkspaceSizes). This repo launches kernels
- *     directly, so the same computation is driven from at::Tensor arguments and the results are
- *     written into a packed struct that is memcpy'd to the device.
- *   - upstream's op_host/*_def.cpp (OpDef) and *_proto.cpp (InferShape/InferDataType) have no
- *     equivalent here — there is no CANN op registry. Their job was to derive the y/scale/y_origin
- *     shapes and dtypes, which the host now does directly when allocating the outputs.
- *   - upstream's tiling key (1/2/31/32) and the per-dtype kernel binary selection are merged into
- *     the struct's tilingKey + dtype fields, which the kernel entry dispatches on.
- *
- * Faithfulness notes carried over deliberately:
- *   - `group_size` and `dst_type` never reach the tiling math upstream either (grep the upstream
- *     tiling for ATTR_INDEX_GROUP_SIZE / ATTR_INDEX_DST_TYPE: declared, never read). They are kept
- *     in the signature for caller compatibility and are otherwise inert.
- *   - The UB-fitting loops keep upstream's exact shape, including the `while (totalSize < ubSize_)`
- *     form that only terminates early when the first probe already fits.
+ * Two notes on the parameter surface:
+ *   - `group_size` and `dst_type` do not participate in the tiling math. They are accepted for
+ *     caller compatibility and are otherwise inert.
+ *   - The UB-fitting loops take the form `while (totalSize < ubSize_)`, which only terminates early
+ *     when the first probe already fits.
  */
 
 #include <cstring>
@@ -96,7 +84,6 @@ int64_t RoundUp(int64_t x, int64_t y)
     return CeilDiv(x, y) * y;
 }
 
-//! Everything upstream read off gert::TilingContext, resolved from torch tensors instead.
 struct SwigluGroupQuantInputs {
     int64_t bs = 0;  // product of x's dims except the last
     int64_t d = 0;   // x's last dim
@@ -112,7 +99,7 @@ struct SwigluGroupQuantInputs {
     int64_t hasClampValue = 0;
 };
 
-//! 1:1 port of upstream's SwigluGroupQuantTiling, minus the gert plumbing.
+//! Computes the row / d / group tiling factors, then the launch geometry.
 class SwigluGroupQuantTiling
 {
 public:
@@ -156,7 +143,6 @@ private:
         return true;
     }
 
-    //! Upstream's GetAttr, reading values the host already resolved.
     void GetAttr()
     {
         quantMode_ = inputs_.quantMode;
@@ -509,7 +495,7 @@ private:
         tilingData_.groupListType = groupListType_;
         tilingData_.coreNum = coreNum_;
 
-        // Upstream's DoOpTiling tail: map the quant mode onto the kernel's tiling key.
+        // Tail of the tiling: map the quant mode onto the kernel's tiling key.
         if (quantMode_ == STATIC_QUANT) {
             tilingKey_ = SWIGLU_GROUP_QUANT_TILING_KEY_GROUP_QUANT;
         } else if (quantMode_ == MX_QUANT) {
@@ -557,9 +543,7 @@ private:
     bool hasGroupIndex_ = false;
 };
 
-//! Output shapes/dtypes — a 1:1 port of construct_swiglu_group_quant_output_tensor in
-//! vllm-ascend csrc/torch_binding.cpp, which is what upstream's *_proto.cpp InferShape/InferDtype
-//! must agree with.
+//! Allocates y / scale / y_origin with the shape and dtype each quant mode calls for.
 std::tuple<at::Tensor, at::Tensor, at::Tensor> ConstructOutputs(const at::Tensor &x, at::ScalarType dst_type,
                                                                 int64_t quant_mode, bool ue8m0_scale)
 {
@@ -652,9 +636,8 @@ HOST_API std::tuple<at::Tensor, at::Tensor, at::Tensor> swiglu_group_quant(
     at::Tensor scale = std::get<1>(outputs);
     at::Tensor y_origin = std::get<2>(outputs);
 
-    // An empty batch has nothing to quantize. Upstream never guards this and its row tiling would
-    // divide by a zero row count; returning the empty outputs is both correct and a no-op for the
-    // kernel logic, which is untouched.
+    // An empty batch has nothing to quantize, and the row tiling below would divide by a zero row
+    // count. Returning the empty outputs is both correct and a no-op for the kernel.
     if (inputs.bs == 0) {
         return outputs;
     }
@@ -725,8 +708,8 @@ HOST_API std::tuple<at::Tensor, at::Tensor, at::Tensor> swiglu_group_quant(
     auto workspace_tensor = at::empty({WORKSPACE_SIZE}, at::TensorOptions().dtype(at::kByte).device(x.device()));
 
     // The kernel reads GetBlockNum() for its used-core count when there is no group index, so the
-    // launch dim must match upstream's SetBlockDim choice: coreNum when a group index is present
-    // (each core walks the whole group list), else the reduced used-core count.
+    // launch dim must be coreNum when a group index is present (each core walks the whole group
+    // list), else the reduced used-core count.
     const int64_t blockDim = inputs.hasGroupIndex ? tilingData.coreNum : tiling.UsedCoreNums();
     EXEC_KERNEL_CMD(swiglu_group_quant, blockDim, x, topk_weight_ptr, group_index_ptr, y, scale, y_origin,
                     workspace_tensor, tilingTensor);

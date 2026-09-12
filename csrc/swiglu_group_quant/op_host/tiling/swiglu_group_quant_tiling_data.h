@@ -12,17 +12,14 @@
  * \file swiglu_group_quant_tiling_data.h
  * \brief Plain tiling-data struct for swiglu_group_quant (A5-only).
  *
- * Adapted from vllm-ascend csrc/moe/swiglu_group_quant/op_host/swiglu_group_quant_tiling.h, which
- * declares the same fields through CANN's BEGIN_TILING_DATA_DEF/REGISTER_TILING_DATA_CLASS
- * machinery. This repo has no CANN op registry: the struct is a plain packed POD, memcpy'd to the
- * device by the host and read field-by-field from a __gm__ pointer by the kernel.
+ * A plain packed POD, memcpy'd to the device by the host and read field-by-field from a __gm__
+ * pointer by the kernel.
  *
- * Field names and types match the upstream struct exactly (all int64_t except `clampValue`, which
- * is float) because the ported kernel headers dereference them by name.
+ * Field names and types must match what the kernel headers dereference by name: all int64_t except
+ * `clampValue`, which is float.
  *
- * Field order is NOT upstream's: every int64_t is 8-byte aligned here, so the kernel's scalar GM
- * loads stay naturally aligned under #pragma pack(1). Upstream gets that for free from the
- * generated class's natural alignment; a packed struct does not.
+ * Field order puts every int64_t first so each one is 8-byte aligned, keeping the kernel's scalar
+ * GM loads naturally aligned under #pragma pack(1) — a packed struct does not get that for free.
  */
 
 #ifndef SWIGLU_GROUP_QUANT_TILING_DATA_H
@@ -61,7 +58,7 @@ struct SwigluGroupQuantTilingData {
     int64_t groupListType;
     int64_t coreNum;
 
-    // ---- appended by this port (not present upstream) ----
+    // ---- dtype / launch metadata ----
     float clampValue;    // offset 200
     int32_t dtype;       // offset 204: bit0 x is bf16, bit1 y is e5m2, bit2 scale is e8m0
     uint32_t tilingKey;  // offset 208: 1 group, 2 mx, 31 fp8, 32 fp8 + y_origin
