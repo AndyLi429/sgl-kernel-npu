@@ -83,6 +83,7 @@ endif()
 if(SGL_KERNEL_ENABLE_A5_ONLY_OPS)
     list(APPEND OP_SRCS
         ${PROJECT_OP_SRC_BASE}/kv_compress_epilog/op_host/kv_compress_epilog.cpp
+        ${PROJECT_OP_SRC_BASE}/swiglu_group_quant/op_host/swiglu_group_quant.cpp
     )
 endif()
 if(BUILD_CATLASS_MODULE)
@@ -245,11 +246,40 @@ if(SGL_KERNEL_ENABLE_A3_ONLY_OPS)
     list(APPEND A3_ONLY_KERNEL_TARGETS sparse_attn_sharedkv_kernel)
 endif()
 
+# Dedicated A5-only kernel targets. swiglu_group_quant is MicroAPI (register-level) code, so it is
+# built with the options its upstream CANN op used rather than the workspace_kernel defaults:
+# automatic synchronization insertion (--cce-auto-sync) is unsound around MicroAPI's hand-managed
+# sync, and cce-aicore-hoist-movemask is likewise disabled upstream. It is kept off workspace_kernel
+# so these options cannot affect the other A5 kernels.
+set(A5_ONLY_KERNEL_TARGETS)
+if(SGL_KERNEL_ENABLE_A5_ONLY_OPS)
+    ascendc_library(swiglu_group_quant_kernel STATIC
+        ${PROJECT_OP_SRC_BASE}/swiglu_group_quant/op_kernel/swiglu_group_quant.cpp
+    )
+    ascendc_include_directories(swiglu_group_quant_kernel PRIVATE
+        ${PROJECT_OP_SRC_BASE}/swiglu_group_quant/op_kernel
+        ${PROJECT_OP_SRC_BASE}/utils/kernel
+    )
+    ascendc_compile_definitions(swiglu_group_quant_kernel PRIVATE
+        -DHAVE_WORKSPACE
+        -DHAVE_TILING
+    )
+    ascendc_compile_options(swiglu_group_quant_kernel PRIVATE
+        --cce-auto-sync=off
+        -Wno-deprecated-declarations
+        -mllvm
+        -cce-aicore-hoist-movemask=false
+        --op_relocatable_kernel_binary=true
+    )
+    list(APPEND A5_ONLY_KERNEL_TARGETS swiglu_group_quant_kernel)
+endif()
+
 # create shared library
 add_library(${OP_PLUGIN_NAME} SHARED ${OP_SRCS})
 
 target_link_libraries(${OP_PLUGIN_NAME} PRIVATE
         ${A3_ONLY_KERNEL_TARGETS}
+        ${A5_ONLY_KERNEL_TARGETS}
         workspace_kernel
         no_workspace_kernel
         ${CATLASS_WORKSPACE_KERNEL_TARGETS}
