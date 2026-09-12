@@ -288,7 +288,9 @@ def _check_group_mode(
     torch.testing.assert_close(deq[nonzero], ref[nonzero], rtol=0.15, atol=0.02)
 
 
-def _check_mx_mode(num_tokens, d, dst_type, seed, use_weight, round_scale):
+def _check_mx_mode(
+    num_tokens, d, dst_type, seed, use_weight, round_scale, clamp_value=0.0
+):
     x = _make_inputs(num_tokens, d, seed=seed)
     topk_weight = None
     if use_weight:
@@ -301,10 +303,11 @@ def _check_mx_mode(num_tokens, d, dst_type, seed, use_weight, round_scale):
         dst_type=dst_type,
         quant_mode=MX_QUANT,
         round_scale=round_scale,
+        clamp_value=clamp_value,
     )
     torch.npu.synchronize()
 
-    ref = _ref_swiglu(x.cpu(), None, topk_weight.cpu() if use_weight else None)
+    ref = _ref_swiglu(x.cpu(), clamp_value, topk_weight.cpu() if use_weight else None)
     split_d = d // 2
     # MX scales are 2-aligned and carry a trailing factor-of-2 dimension.
     assert scale.shape == (num_tokens, (split_d + 31) // 32 // 2, 2)
@@ -316,6 +319,23 @@ def _check_mx_mode(num_tokens, d, dst_type, seed, use_weight, round_scale):
 
     # 1. The stored e8m0 byte is fully determined by the block's max bf16 exponent.
     ref_bytes = _ref_mx_scale_bytes(ref, dst_type, x.dtype).to(torch.uint8)
+
+    # A loose clamp asserts nothing: silu(gate)*up stays inside the exponent bucket a randn block
+    # already occupies, so clamp_value >= 3.0 moves no byte at all and the comparison below would
+    # pass against a kernel that drops clamp_value entirely. Reject such test data here, where the
+    # failure names the cause, rather than accepting a test with no power.
+    if clamp_value != 0.0:
+        unclamped = _ref_mx_scale_bytes(
+            _ref_swiglu(x.cpu(), 0.0, topk_weight.cpu() if use_weight else None),
+            dst_type,
+            x.dtype,
+        ).to(torch.uint8)
+        moved = (ref_bytes != unclamped).float().mean().item()
+        assert moved >= 0.10, (
+            f"clamp_value={clamp_value} moves only {moved:.1%} of the scale bytes at this seed and"
+            f" shape, so the clamp is untested -- tighten clamp_value or pick another seed"
+        )
+
     torch.testing.assert_close(flat_scale, ref_bytes, rtol=0, atol=0)
 
     # 2. Each stored scale is a power of two and dequantizing recovers the activation. The scale
@@ -334,6 +354,7 @@ def _check_mx_mode(num_tokens, d, dst_type, seed, use_weight, round_scale):
         dst_type=dst_type,
         quant_mode=MX_QUANT,
         round_scale=not round_scale,
+        clamp_value=clamp_value,
     )
     torch.npu.synchronize()
     torch.testing.assert_close(
@@ -507,6 +528,71 @@ class TestSwigluGroupQuant(unittest.TestCase):
     def test_mx_quant_e5m2_with_round_scale(self):
         _check_mx_mode(32, 512, torch.float8_e5m2, 16, False, True)
 
+    def test_mx_quant_with_clamp(self):
+        # The clamp is not a side detail here: it changes the activation, hence the bf16 exponent
+        # field the scale is read from, hence the stored e8m0 byte. This is also the mode
+        # production actually calls, with swiglu_limit as the clamp.
+        _check_mx_mode(32, 512, torch.float8_e4m3fn, 33, False, False, 1.0)
+
+    def test_mx_quant_e5m2_with_clamp(self):
+        # e5m2's exponent lower bound (0x0780 vs 0x0400) lets a block fall less far, so this needs
+        # a looser clamp than the e4m3 case to move a comparable share of the bytes.
+        _check_mx_mode(32, 512, torch.float8_e5m2, 34, False, False, 1.5)
+
+    def test_mx_quant_clamp_and_weight(self):
+        # The weight rescales the activation before the exponent field is read, so it and the
+        # clamp both land on the same byte.
+        _check_mx_mode(32, 512, torch.float8_e4m3fn, 35, True, False, 1.0)
+
+    def test_mx_quant_large_batch_multi_core(self):
+        # The shape class this op runs on in production: a full token batch, which reaches the
+        # multi-core split and the rowFactor UB loop rather than a single row block.
+        num_tokens, d = 2048, 768
+        x = _make_inputs(num_tokens, d, seed=36)
+        y, scale, _ = _call(x, dst_type=torch.float8_e4m3fn, quant_mode=MX_QUANT)
+        torch.npu.synchronize()
+
+        split_d = d // 2
+        nblocks = split_d // 32
+        assert scale.shape == (num_tokens, nblocks // 2, 2)
+        ref = _ref_swiglu(x.cpu())
+        flat = scale.cpu().view(torch.uint8).reshape(num_tokens, -1)[:, :nblocks]
+        torch.testing.assert_close(
+            flat,
+            _ref_mx_scale_bytes(ref, torch.float8_e4m3fn, x.dtype).to(torch.uint8),
+            rtol=0,
+            atol=0,
+        )
+        deq, _ = _dequantize(y.cpu(), flat, 32, split_d)
+        torch.testing.assert_close(deq, ref.to(x.dtype).float(), rtol=0.25, atol=0.02)
+
+    def test_mx_quant_zero_block_gives_zero_scale_byte(self):
+        # A block whose max exponent is 0 (every element zero) must store byte 0 rather than the
+        # format's clamped lower bound. Zero rows and live rows run in the same launch so both
+        # branches of the scale computation are exercised together.
+        num_tokens, d = 32, 512
+        zero_rows = 8
+        x = _make_inputs(num_tokens, d, seed=37)
+        x[:zero_rows] = 0.0
+        y, scale, _ = _call(x, dst_type=torch.float8_e4m3fn, quant_mode=MX_QUANT)
+        torch.npu.synchronize()
+
+        split_d = d // 2
+        flat = scale.cpu().view(torch.uint8).reshape(num_tokens, -1)[:, : split_d // 32]
+        ref_bytes = _ref_mx_scale_bytes(
+            _ref_swiglu(x.cpu()), torch.float8_e4m3fn, x.dtype
+        ).to(torch.uint8)
+        # Guard the test's premise before trusting it: the input must actually exercise both paths.
+        assert (
+            ref_bytes[:zero_rows] == 0
+        ).all(), "zero rows must give zero scale bytes"
+        assert (
+            ref_bytes[zero_rows:] != 0
+        ).any(), "live rows must give non-zero scale bytes"
+        torch.testing.assert_close(flat, ref_bytes, rtol=0, atol=0)
+        # An all-zero block quantizes to an all-zero y.
+        assert (y.cpu().view(torch.uint8)[:zero_rows] == 0).all()
+
     def test_mx_quant_fp16_input(self):
         num_tokens, d = 16, 512
         x = _make_inputs(num_tokens, d, dtype=torch.float16, seed=17)
@@ -522,6 +608,43 @@ class TestSwigluGroupQuant(unittest.TestCase):
             rtol=0,
             atol=0,
         )
+
+    def test_output_origin_true_is_inert_for_group_and_mx(self):
+        # Only fp8 has tiling keys that store y_origin (31/32); group and mx take keys 1/2 and the
+        # kernel never passes y_origin to their op classes. So output_origin must leave y and scale
+        # bit-identical -- and y_origin comes back allocated but unwritten, which is why callers
+        # must not read it in these two modes. The invariance is all this contract can assert.
+        num_tokens, d = 16, 512
+        for quant_mode in (GROUP_QUANT, MX_QUANT):
+            x = _make_inputs(num_tokens, d, seed=38 + quant_mode)
+            y_off, scale_off, _ = _call(
+                x,
+                dst_type=torch.float8_e4m3fn,
+                quant_mode=quant_mode,
+                output_origin=False,
+            )
+            y_on, scale_on, y_origin = _call(
+                x,
+                dst_type=torch.float8_e4m3fn,
+                quant_mode=quant_mode,
+                output_origin=True,
+            )
+            torch.npu.synchronize()
+            assert y_origin.shape == (num_tokens, d // 2)
+            assert y_origin.dtype == x.dtype
+            # Compare as bytes: the scale dtype differs per mode (fp32 for group, e8m0 for mx).
+            torch.testing.assert_close(
+                y_on.cpu().view(torch.uint8),
+                y_off.cpu().view(torch.uint8),
+                rtol=0,
+                atol=0,
+            )
+            torch.testing.assert_close(
+                scale_on.cpu().view(torch.uint8),
+                scale_off.cpu().view(torch.uint8),
+                rtol=0,
+                atol=0,
+            )
 
     # ---- mode 3: per-128 fp8 scales, fp32 or e8m0 ----
 
