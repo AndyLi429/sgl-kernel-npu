@@ -1,8 +1,6 @@
 import importlib.util
 from pathlib import Path
 
-import pytest
-
 _SCRIPT_PATH = Path(__file__).with_name("benchmark_swiglu_mxfp8_quant.py")
 
 
@@ -15,9 +13,29 @@ def _load_benchmark_module():
     return module
 
 
-def test_benchmark_rejects_hidden_size_without_complete_mx_groups():
-    """Catch a benchmark that would compare incompatible MXFP8 output layouts."""
-    benchmark = _load_benchmark_module()
+class _FakeNpu:
+    def __init__(self):
+        self.synchronize_calls = 0
 
-    with pytest.raises(SystemExit):
-        benchmark.parse_args(["--hidden-size", "3074"])
+    def synchronize(self):
+        self.synchronize_calls += 1
+
+
+class _FakeTorch:
+    def __init__(self):
+        self.npu = _FakeNpu()
+
+
+def test_benchmark_prints_progress_before_running_each_operator(capsys):
+    """Catch a benchmark that appears stuck while the first operator is compiling."""
+    benchmark = _load_benchmark_module()
+    torch = _FakeTorch()
+    calls = []
+
+    benchmark._benchmark(
+        torch, "triton", lambda: calls.append(None), warmup=1, iterations=2
+    )
+
+    assert calls == [None, None, None]
+    assert torch.npu.synchronize_calls == 2
+    assert "triton: warmup" in capsys.readouterr().out
